@@ -3,5 +3,27 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+  "java.configuration.updateBuildConfiguration": "interactive",
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.autocomplete": "disabled",
+  "C_Cpp.errorSquiggles": "disabled",
+  "C_Cpp.formatting": "disabled",
+  "C_Cpp.enhancedColorization": "disabled",
+  "C_Cpp.workspaceParsingPriority": "low",
+  "C_Cpp.default.browse.limitSymbolsToIncludedHeaders": false,
+  "C_Cpp.loggingLevel": "None",
+  "clangd.enable": false,
+  "files.associations": {
+    "*.h": "plaintext",
+    "*.m": "plaintext", 
+    "*.mm": "plaintext",
+    "*.cpp": "plaintext",
+    "*.c": "plaintext"
+  },
+  "files.exclude": {},
+  "search.exclude": {},
+  "typescript.preferences.includePackageJsonAutoImports": "off",
+  "typescript.suggest.autoImports": true,
+  "extensions.ignoreRecommendations": false
 }

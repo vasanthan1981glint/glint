@@ -1,229 +1,246 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { collection, getDocs, getFirestore, query, where } from 'firebase/firestore';
-import React, { useState } from 'react';
+import { signInWithEmailAndPassword, User } from 'firebase/auth';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  query,
+  setDoc,
+  Timestamp,
+  where,
+} from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
-  Keyboard,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
-  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
 import { auth } from '../firebaseConfig';
 
 const db = getFirestore();
 
-export default function LoginScreen() {
+const createUserIfNotExists = async (user: User) => {
+  const userRef = doc(db, 'users', user.uid);
+  const snap = await getDoc(userRef);
+
+  if (!snap.exists()) {
+    await setDoc(userRef, {
+      username: user.email?.split('@')[0] || 'new_user',
+      email: user.email,
+      bio: '',
+      photo: '',
+      dob: '',
+      createdAt: Timestamp.now(),
+    });
+  }
+};
+
+function LoginScreen() {
   const [input, setInput] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const router = useRouter();
 
   const handleLogin = async () => {
+    if (isLoggingIn) return; // Prevent multiple login attempts
+    
     if (!input || !password) {
       Alert.alert('Missing Info', 'Please enter your email/username and password.');
       return;
     }
 
-    let emailToUse = input;
+    setIsLoggingIn(true);
+    
+    try {
+      let email = input;
 
-    if (!input.includes('@')) {
-      try {
-        const q = query(collection(db, 'users'), where('username', '==', input));
-        const snapshot = await getDocs(q);
+      // If input is not an email, search for username
+      if (!input.includes('@')) {
+        const usersQuery = query(collection(db, 'users'), where('username', '==', input));
+        const querySnapshot = await getDocs(usersQuery);
 
-        if (snapshot.empty) {
-          Alert.alert('Login failed', 'Username not found.');
+        if (querySnapshot.empty) {
+          Alert.alert('User Not Found', 'No user found with that username.');
+          setIsLoggingIn(false);
           return;
         }
 
-        const userData = snapshot.docs[0].data();
-        emailToUse = userData.email;
-      } catch (error) {
-        Alert.alert('Login failed', 'Something went wrong.');
-        return;
+        const userDoc = querySnapshot.docs[0];
+        email = userDoc.data().email;
       }
-    }
 
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, emailToUse, password);
+      // Sign in with Firebase Auth
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      if (user && !user.emailVerified) {
-        Alert.alert('Verify your email', 'Please check your inbox before logging in.');
-        return;
-      }
+      if (user) {
+        // Check if email is verified
+        if (!user.emailVerified) {
+          Alert.alert(
+            'Email Not Verified',
+            'Please verify your email before signing in.',
+            [{ text: 'OK' }]
+          );
+          setIsLoggingIn(false);
+          return;
+        }
 
-      router.replace('/home');
-    } catch (error) {
-      Alert.alert('Login failed', 'Email or password is incorrect.');
+        // Create user document if it doesn't exist
+        await createUserIfNotExists(user);
+        
+        // Authentication context will handle the redirect automatically
+        console.log('✅ Login successful, authentication context will handle redirect');
+        // Don't reset isLoggingIn here - let the auth context handle the redirect
+      }
+    } catch (error: any) {
+      console.error('Login error:', error);
+      setIsLoggingIn(false);
+      
+      let errorMessage = 'Login failed. Please try again.';
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = 'No account found with this email.';
+      } else if (error.code === 'auth/wrong-password') {
+        errorMessage = 'Incorrect password.';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'Invalid email address.';
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many failed attempts. Please try again later.';
+      }
+      
+      Alert.alert('Login Error', errorMessage);
     }
   };
 
   return (
-    <View style={styles.root}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <LinearGradient
         colors={['#f8f8f8', '#f2f2f2', '#fbe4c3']}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
-        style={styles.gradient}
+        style={styles.container}
       >
-        <SafeAreaView style={{ flex: 1 }}>
-          <TouchableOpacity onPress={() => router.push('/home')} style={styles.homeDevButton}>
-            <Text style={styles.homeDevText}>🏠 Home</Text>
-          </TouchableOpacity>
+        <Text style={styles.title}>Welcome to Glint</Text>
 
-          <TouchableOpacity onPress={() => router.push('/skip-warning')} style={styles.skipContainer}>
-            <LinearGradient
-              colors={['#FF3D3D', '#FFBB00', '#00FFB3', '#00B0FF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.skipGradient}
-            >
-              <Text style={styles.skipText}>Skip</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+        <TextInput
+          style={styles.input}
+          placeholder="Email or Username"
+          placeholderTextColor="#888"
+          value={input}
+          onChangeText={setInput}
+          autoCapitalize="none"
+          keyboardType="email-address"
+        />
 
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-              style={styles.keyboard}
-            >
-              <Text style={styles.title}>Welcome to Glint Chat ✨</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor="#888"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
 
-              <TextInput
-                placeholder="Enter your email or username"
-                value={input}
-                onChangeText={setInput}
-                style={styles.input}
-                placeholderTextColor="#999"
-              />
-              <TextInput
-                placeholder="Enter your password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                style={styles.input}
-                placeholderTextColor="#999"
-              />
+        <TouchableOpacity onPress={handleLogin} style={styles.button}>
+          <LinearGradient
+            colors={['#FF3D3D', '#FFBB00', '#00FFB3', '#00B0FF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.gradientButton}
+          >
+            <Text style={styles.buttonText}>Log In</Text>
+          </LinearGradient>
+        </TouchableOpacity>
 
-              <TouchableOpacity style={styles.button} onPress={handleLogin}>
-                <LinearGradient
-                  colors={['#FF3D3D', '#FFBB00', '#00FFB3', '#00B0FF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.exactGradientButton}
-                >
-                  <Text style={styles.exactButtonText}>Continue</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.push('/signup')}>
+          <Text style={styles.link}>Don&apos;t have an account? Sign up</Text>
+        </TouchableOpacity>
 
-              <TouchableOpacity onPress={() => router.push('/forgot')}>
-                <Text style={styles.link}>Forgot Password?</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => router.push('/signup')}>
-                <Text style={styles.link}>Don't have an account? Sign Up</Text>
-              </TouchableOpacity>
-            </KeyboardAvoidingView>
-          </TouchableWithoutFeedback>
-        </SafeAreaView>
+        <TouchableOpacity onPress={() => router.push('/forgot')}>
+          <Text style={styles.link}>Forgot Password?</Text>
+        </TouchableOpacity>
       </LinearGradient>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
+// Main Index Component - handles initial routing based on auth state
+export default function IndexScreen() {
+  const { user, isLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    // Only handle routing after auth loading is complete
+    if (!isLoading) {
+      if (user) {
+        console.log('🏠 User authenticated, redirecting to home');
+        router.replace('/(tabs)/home');
+      }
+      // If no user, stay on this login screen (no redirect needed)
+    }
+  }, [user, isLoading, router]);
+
+  // Show splash screen while authentication is loading
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <Text style={{ fontSize: 32, fontWeight: 'bold', color: '#000', marginBottom: 20 }}>Glint</Text>
+        <Text style={{ fontSize: 16, color: '#666' }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  // Show login screen when no user is authenticated
+  return <LoginScreen />;
+}
+
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#f8f8f8',
-  },
-  gradient: {
-    flex: 1,
-  },
-  keyboard: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  homeDevButton: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
-    zIndex: 10,
-    backgroundColor: '#000',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  homeDevText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  skipContainer: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    zIndex: 10,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  skipGradient: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-  },
-  skipText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 30,
-    color: '#222',
-    textAlign: 'center',
-  },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 30, textAlign: 'center' },
   input: {
-    width: '80%',
-    padding: 15,
-    borderRadius: 10,
     backgroundColor: '#fff',
-    marginBottom: 15,
+    width: '100%',
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
     fontSize: 16,
+    marginBottom: 20,
   },
   button: {
-    width: '80%',
+    width: '100%',
     borderRadius: 50,
     overflow: 'hidden',
     marginTop: 10,
-    marginBottom: 20,
   },
-  exactGradientButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 32,
+  gradientButton: {
+    paddingVertical: 14,
     borderRadius: 50,
     alignItems: 'center',
     justifyContent: 'center',
+    width: '100%',
   },
-  exactButtonText: {
+  buttonText: {
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
+    textAlign: 'center',
   },
   link: {
     color: '#333',
     textDecorationLine: 'underline',
     fontSize: 14,
-    marginTop: 10,
+    marginTop: 20,
+    textAlign: 'center',
   },
 });

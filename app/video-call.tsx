@@ -3,121 +3,140 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getDatabase, onValue, ref, set } from 'firebase/database';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Image,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Platform,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import {
-  mediaDevices,
-  MediaStream,
-  RTCIceCandidate,
-  RTCPeerConnection,
-  RTCSessionDescription,
-  RTCView,
+    mediaDevices,
+    MediaStream,
+    MediaStreamTrack,
+    RTCIceCandidate,
+    RTCPeerConnection,
+    RTCRtpSender,
+    RTCSessionDescription,
+    RTCView,
 } from 'react-native-webrtc';
 
-const configuration = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-};
-
-export default function VideoCallScreen() {
+export default function VideoCall() {
   const { user } = useLocalSearchParams<{ user: string }>();
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [isRinging, setIsRinging] = useState(true);
-  const [micOn, setMicOn] = useState(true);
-  const [videoOn, setVideoOn] = useState(true);
-  const [usingFrontCamera, setUsingFrontCamera] = useState(true);
-  const [callTime, setCallTime] = useState(0);
   const [remoteName, setRemoteName] = useState('');
-  const [remotePhoto, setRemotePhoto] = useState('');
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null); // ✅ FIXED
-  const pc = useRef<RTCPeerConnection | null>(null);
-  const db = getDatabase();
-  const callId = `call-${user}`;
+  const [micOn, setMicOn] = useState(true);
+  const [usingFrontCam, setUsingFrontCam] = useState(true);
+  const [callTime, setCallTime] = useState(0);
+  const pc = useRef<any>(null); // ✅ Fix type errors with `any`
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const router = useRouter();
+  const db = getDatabase();
 
-  const startCall = async (facing: 'user' | 'environment' = 'user') => {
-    const stream = await mediaDevices.getUserMedia({
-      video: { facingMode: facing },
+  const getCameraStream = async (facing = 'user') => {
+    const isFront = facing === 'user';
+    const devices = await mediaDevices.enumerateDevices() as any[];
+    const videoSourceId = devices.find(
+      (device) =>
+        device.kind === 'videoinput' &&
+        device.facing === (isFront ? 'front' : 'environment')
+    )?.deviceId;
+
+    return mediaDevices.getUserMedia({
       audio: true,
-    });
-
-    setLocalStream(stream);
-    setVideoOn(true);
-
-    const peer = new RTCPeerConnection(configuration);
-    pc.current = peer;
-
-    stream.getTracks().forEach((track) => {
-      peer.addTrack(track, stream);
-    });
-
-    const remote = new MediaStream();
-    setRemoteStream(remote);
-
-    (peer as any).ontrack = (event: any) => {
-      if (event.streams[0]) {
-        event.streams[0].getTracks().forEach((track: any) => {
-          remote.addTrack(track);
-        });
-        setIsRinging(false);
-        timerRef.current = setInterval(() => {
-          setCallTime((prev) => prev + 1);
-        }, 1000);
-      }
-    };
-
-    (peer as any).onicecandidate = (event: any) => {
-      if (event.candidate) {
-        set(ref(db, `${callId}/callerCandidates`), event.candidate.toJSON());
-      }
-    };
-
-    const offer = await peer.createOffer({});
-    await peer.setLocalDescription(offer);
-    await set(ref(db, `${callId}/offer`), offer);
-
-    onValue(ref(db, `${callId}/answer`), async (snapshot) => {
-      const data = snapshot.val();
-      if (data && !peer.remoteDescription) {
-        const answerDesc = new RTCSessionDescription(data);
-        await peer.setRemoteDescription(answerDesc);
-      }
-    });
-
-    onValue(ref(db, `${callId}/calleeCandidates`), async (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        try {
-          const candidate = new RTCIceCandidate(data);
-          await peer.addIceCandidate(candidate);
-        } catch (e) {
-          console.warn('Error adding ICE candidate', e);
-        }
-      }
+      video: {
+        facingMode: isFront ? 'user' : 'environment',
+        deviceId: videoSourceId,
+      },
     });
   };
 
+  const switchCamera = async () => {
+    const stream = await getCameraStream(usingFrontCam ? 'environment' : 'user');
+    setUsingFrontCam(!usingFrontCam);
+    setLocalStream(stream);
+
+    if (pc.current) {
+      const senders = pc.current.getSenders();
+      const videoSender = senders.find((s: RTCRtpSender) => s.track?.kind === 'video');
+      if (videoSender) {
+        const newVideoTrack = stream.getVideoTracks()[0];
+        videoSender.replaceTrack(newVideoTrack);
+      }
+    }
+  };
+
   useEffect(() => {
+    const callId = `call-${user}`;
+
+    const startCall = async () => {
+      const stream = await getCameraStream('user');
+      setLocalStream(stream);
+
+      const peer = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      }) as any; // ✅ cast to `any` to fix TypeScript errors
+      pc.current = peer;
+
+      stream.getTracks().forEach((track: MediaStreamTrack) => {
+        peer.addTrack(track, stream);
+      });
+
+      const remote = new MediaStream();
+      setRemoteStream(remote);
+
+      peer.ontrack = (event: any) => {
+        event.streams[0].getTracks().forEach((track: MediaStreamTrack) => {
+          remote.addTrack(track);
+        });
+        if (!timerRef.current) {
+          timerRef.current = setInterval(() => setCallTime((t) => t + 1), 1000);
+        }
+      };
+
+      peer.onicecandidate = (event: any) => {
+        if (event.candidate) {
+          set(ref(db, `${callId}/callerCandidates`), event.candidate.toJSON());
+        }
+      };
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      await set(ref(db, `${callId}/offer`), offer);
+
+      onValue(ref(db, `${callId}/answer`), async (snap) => {
+        const data = snap.val();
+        if (data && !peer.remoteDescription) {
+          await peer.setRemoteDescription(new RTCSessionDescription(data));
+        }
+      });
+
+      onValue(ref(db, `${callId}/calleeCandidates`), async (snap) => {
+        const data = snap.val();
+        if (data) {
+          try {
+            await peer.addIceCandidate(new RTCIceCandidate(data));
+          } catch (err) {
+            console.warn('ICE error', err);
+          }
+        }
+      });
+    };
+
     startCall();
 
     const userRef = ref(db, `users/${user}`);
-    onValue(userRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        setRemoteName(data.name || '');
-        setRemotePhoto(data.photo || '');
+    onValue(userRef, (snap) => {
+      const d = snap.val();
+      if (d) {
+        setRemoteName(d.name || '');
       }
     });
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current); // ✅ FIXED
+      if (timerRef.current) clearInterval(timerRef.current);
       pc.current?.close();
-      pc.current = null;
     };
   }, []);
 
@@ -130,89 +149,38 @@ export default function VideoCallScreen() {
     }
   };
 
-  const toggleVideo = () => {
-    if (localStream) {
-      localStream.getVideoTracks().forEach((track) => {
-        track.enabled = !track.enabled;
-      });
-      setVideoOn((prev) => !prev);
-    }
-  };
-
-  const switchCamera = async () => {
-    setUsingFrontCamera((prev) => !prev);
-    if (pc.current) {
-      pc.current.close();
-      pc.current = null;
-    }
-    startCall(!usingFrontCamera ? 'user' : 'environment');
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const secs = (seconds % 60).toString().padStart(2, '0');
-    return `${mins}:${secs}`;
-  };
-
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.videoContainer}>
-        {videoOn && localStream ? (
-          <RTCView streamURL={localStream.toURL()} style={styles.video} objectFit="cover" />
-        ) : (
-          <View style={styles.videoOffPlaceholder}>
-            <Ionicons name="videocam-off" size={48} color="#999" />
-          </View>
-        )}
-        {remoteStream && (
-          <RTCView streamURL={remoteStream.toURL()} style={styles.videoRemote} objectFit="cover" />
-        )}
+      {remoteStream && (
+        <RTCView streamURL={remoteStream.toURL()} style={styles.remote} objectFit="cover" />
+      )}
+      {localStream && (
+        <RTCView streamURL={localStream.toURL()} style={styles.local} objectFit="cover" />
+      )}
+
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={switchCamera} style={styles.iconBtn}>
+          <Ionicons name={usingFrontCam ? 'camera-reverse' : 'close'} size={24} color="white" />
+        </TouchableOpacity>
+        <View style={styles.titleCenter}>
+          <Text style={styles.name}>{remoteName || 'User'}</Text>
+          <Text style={styles.status}>Calling...</Text>
+        </View>
+        <View style={{ width: 24 }} />
       </View>
 
-      {remoteName !== '' && (
-        <View style={styles.remoteHeader}>
-          {remotePhoto ? (
-            <View style={styles.avatarContainer}>
-              <View style={styles.avatarBorder}>
-                <Image source={{ uri: remotePhoto }} style={styles.avatarImage} />
-              </View>
-            </View>
-          ) : null}
-          <Text style={styles.remoteName}>{remoteName}</Text>
-        </View>
-      )}
-
-      {!isRinging && (
-        <View style={styles.timerBox}>
-          <Text style={styles.timerText}>{formatTime(callTime)}</Text>
-        </View>
-      )}
-
-      {isRinging && (
-        <View style={styles.ringingOverlay}>
-          <View style={styles.ringingBox}>
-            <Ionicons name="call" size={24} color="white" />
-            <View style={{ height: 8 }} />
-            <Text style={{ color: 'white', fontSize: 18 }}>Calling...</Text>
-          </View>
-        </View>
-      )}
-
       <View style={styles.controls}>
-        <TouchableOpacity style={styles.controlButton} onPress={toggleMic}>
-          <Ionicons name={micOn ? 'mic' : 'mic-off'} size={24} color="white" />
+        <TouchableOpacity style={styles.grayBtn}>
+          <Ionicons name="videocam-off" size={22} color="white" />
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.controlButton} onPress={toggleVideo}>
-          <Ionicons name={videoOn ? 'videocam' : 'videocam-off'} size={24} color="white" />
+        <TouchableOpacity style={styles.grayBtn}>
+          <Ionicons name="volume-high" size={22} color="white" />
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.controlButton} onPress={switchCamera}>
-          <Ionicons name="camera-reverse" size={24} color="white" />
+        <TouchableOpacity style={styles.grayBtn} onPress={toggleMic}>
+          <Ionicons name={micOn ? 'mic' : 'mic-off'} size={22} color="white" />
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.endButton} onPress={() => router.back()}>
-          <Ionicons name="call" size={28} color="white" />
+        <TouchableOpacity style={styles.endBtn} onPress={() => router.back()}>
+          <Ionicons name="call" size={26} color="white" />
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -220,92 +188,61 @@ export default function VideoCallScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'black' },
-  videoContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  video: { width: '100%', height: '50%' },
-  videoRemote: { width: '100%', height: '50%' },
-  videoOffPlaceholder: {
-    width: '100%',
-    height: '50%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#111',
+  container: {
+    flex: 1,
+    backgroundColor: 'black',
+    paddingTop: Platform.OS === 'android' ? 25 : 0,
   },
+  remote: {
+    flex: 1,
+  },
+  local: {
+    position: 'absolute',
+    top: 80,
+    right: 16,
+    width: 100,
+    height: 140,
+    borderRadius: 12,
+    borderColor: 'white',
+    borderWidth: 1,
+  },
+  topBar: {
+    position: 'absolute',
+    top: 40,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  iconBtn: {
+    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 20,
+  },
+  titleCenter: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  name: { color: 'white', fontSize: 16, fontWeight: '600' },
+  status: { fontSize: 13, color: '#ccc' },
   controls: {
     position: 'absolute',
     bottom: 40,
     width: '100%',
-    alignItems: 'center',
-  },
-  controlButton: {
-    backgroundColor: '#444',
-    borderRadius: 24,
-    padding: 12,
-    marginBottom: 10,
-  },
-  endButton: {
-    backgroundColor: 'red',
-    borderRadius: 32,
-    padding: 16,
-    marginTop: 10,
-  },
-  ringingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ringingBox: {
-    backgroundColor: '#222',
-    padding: 20,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  timerBox: {
-    position: 'absolute',
-    top: 16,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  timerText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  remoteHeader: {
-    position: 'absolute',
-    top: 16,
-    left: 16,
     flexDirection: 'row',
+    justifyContent: 'space-evenly',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 20,
   },
-  remoteName: {
-    color: 'white',
-    fontSize: 16,
-    marginLeft: 8,
-    fontWeight: '600',
+  grayBtn: {
+    backgroundColor: '#444',
+    padding: 16,
+    borderRadius: 40,
   },
-  avatarContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  avatarBorder: {
-    borderWidth: 1,
-    borderColor: 'white',
-    borderRadius: 16,
-  },
-  avatarImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  endBtn: {
+    backgroundColor: 'red',
+    padding: 16,
+    borderRadius: 40,
   },
 });

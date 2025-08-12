@@ -2,45 +2,53 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
-    Image,
-    SafeAreaView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Image,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 export default function CallScreen() {
-  const { user } = useLocalSearchParams();
-  const avatarUri = 'https://i.pravatar.cc/150?u=' + user;
+  const params = useLocalSearchParams();
+  const user = typeof params.user === 'string' ? params.user : 'User';
+  const avatar = typeof params.avatar === 'string' ? params.avatar : 'https://i.pravatar.cc/150?u=default';
+
   const router = useRouter();
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000" />
 
-      {/* 🧑‍ Profile Info */}
-      <View style={styles.profileSection}>
-        <Image source={{ uri: avatarUri }} style={styles.avatar} />
-        <Text style={styles.username}>{user}</Text>
-        <Text style={styles.subText}>Calling...</Text>
+      {/* 🔝 Top Bar */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={28} color="white" />
+        </TouchableOpacity>
+        <View style={styles.topText}>
+          <Text style={styles.userName}>{user}</Text>
+          <Text style={styles.status}>Calling...</Text>
+        </View>
+        <View style={{ width: 28 }} />
       </View>
 
-      {/* 🔘 Call Controls */}
-      <View style={styles.controls}>
-        <TouchableOpacity style={styles.button}>
-          <Ionicons name="mic-off" size={28} color="#fff" />
-          <Text style={styles.btnLabel}>Mute</Text>
-        </TouchableOpacity>
+      {/* 🧑 Profile */}
+      <View style={styles.profileSection}>
+        <Image source={{ uri: avatar }} style={styles.avatar} />
+      </View>
 
-        <TouchableOpacity style={[styles.button, styles.endButton]} onPress={() => router.back()}>
-          <Ionicons name="call" size={28} color="#fff" />
-        </TouchableOpacity>
-
+      {/* 🔘 Bottom Controls */}
+      <View style={styles.bottomBar}>
         <TouchableOpacity style={styles.button}>
-          <Ionicons name="volume-high" size={28} color="#fff" />
-          <Text style={styles.btnLabel}>Speaker</Text>
+          <Ionicons name="mic-off" size={28} color="white" />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.button, styles.endButton]}>
+          <Ionicons name="call" size={28} color="white" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.button}>
+          <Ionicons name="volume-high" size={28} color="white" />
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -51,47 +59,47 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
-    justifyContent: 'space-between',
-    paddingBottom: 60,
   },
-  profileSection: {
+  topBar: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 120,
+    paddingHorizontal: 20,
+    marginTop: 10,
+    justifyContent: 'space-between',
   },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 2,
-    borderColor: '#fff',
-    marginBottom: 16,
+  topText: {
+    alignItems: 'center',
   },
-  username: {
-    color: '#fff',
-    fontSize: 24,
+  userName: {
+    color: 'white',
+    fontSize: 18,
     fontWeight: '600',
   },
-  subText: {
+  status: {
     color: '#aaa',
-    fontSize: 16,
-    marginTop: 4,
+    fontSize: 14,
   },
-  controls: {
+  profileSection: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatar: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+  },
+  bottomBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginHorizontal: 40,
+    marginBottom: 40,
   },
   button: {
-    alignItems: 'center',
-  },
-  endButton: {
-    backgroundColor: '#ff3b30',
-    padding: 18,
+    backgroundColor: '#222',
+    padding: 20,
     borderRadius: 50,
   },
-  btnLabel: {
-    color: '#fff',
-    fontSize: 12,
-    marginTop: 6,
+  endButton: {
+    backgroundColor: 'red',
   },
 });

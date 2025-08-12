@@ -1,31 +1,43 @@
-// firebaseConfig.ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+import { initializeApp } from 'firebase/app';
+import { initializeAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
-import 'firebase/compat/firestore';
-import 'firebase/compat/storage';
+// Import getReactNativePersistence with type assertion for Firebase 12.0.0
+const { getReactNativePersistence } = require('firebase/auth') as any;
 
-// ✅ Make sure this bucket name matches Firebase console
+console.log('🔥 Loading Firebase configuration (TypeScript)...');
+
+// 🔒 SECURE: Firebase config from environment variables
 const firebaseConfig = {
-  apiKey: "AIzaSyAUs11-YDiNO7C9pv9UR_19bvrbLbJg91A",
-  authDomain: "glint-7e3c3.firebaseapp.com",
-  projectId: "glint-7e3c3",
-  storageBucket: "glint-7e3c3.firebasestorage.app", // ✅ THIS IS THE FIX
-  messagingSenderId: "869525277131",
-  appId: "1:869525277131:web:b75a03f20fc93f81da0e4e"
+  apiKey: Constants.expoConfig?.extra?.firebaseApiKey || process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: Constants.expoConfig?.extra?.firebaseAuthDomain || process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: Constants.expoConfig?.extra?.firebaseProjectId || process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: Constants.expoConfig?.extra?.firebaseStorageBucket || process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: Constants.expoConfig?.extra?.firebaseMessagingSenderId || process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: Constants.expoConfig?.extra?.firebaseAppId || process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
-// ✅ Initialize Firebase only once
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
+// 🔒 SECURITY: Validate Firebase configuration
+if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+  throw new Error('🚨 SECURITY ERROR: Firebase configuration is missing or invalid');
 }
 
-// ✅ Export Firebase services
-const auth = firebase.auth();
-const db = firebase.firestore();
-const storage = firebase.storage();
+const app = initializeApp(firebaseConfig);
+console.log('🔥 Firebase app initialized');
 
-// ✅ Debug log (optional)
-console.log("✔️ Firebase initialized. Using bucket:", (firebase.app().options as any).storageBucket);
+// Initialize auth with AsyncStorage persistence
+// This ensures users stay logged in after closing and reopening the app
+const auth = initializeAuth(app, {
+  persistence: getReactNativePersistence(AsyncStorage)
+});
 
-export { auth, db, firebase, storage };
+console.log('🔥 Firebase Auth initialized with AsyncStorage persistence!');
+
+const db = getFirestore(app);
+const storage = getStorage(app);
+
+export { auth, db, storage };
+

@@ -5,24 +5,41 @@ import { doc, setDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useState } from 'react';
 import {
-  Alert,
-  Image,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    Image,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import uuid from 'react-native-uuid';
 import { auth, db, storage } from '../firebaseConfig';
+
+function isValidDate(dob: string): boolean {
+  if (dob.length !== 10 || dob[2] !== '/' || dob[5] !== '/') return false;
+  const [day, month, year] = dob.split('/').map(Number);
+  try {
+    const date = new Date(year, month - 1, day);
+    return (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    );
+  } catch {
+    return false;
+  }
+}
 
 export default function ProfileScreen() {
   const [image, setImage] = useState<string | null>(null);
   const [bio, setBio] = useState('');
   const [dob, setDob] = useState('');
   const [username, setUsername] = useState('');
+  const [isPrivate, setIsPrivate] = useState(false);
   const router = useRouter();
 
   const pickImage = async () => {
@@ -30,9 +47,9 @@ export default function ProfileScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
     });
-
-    if (!result.canceled) {
+    if (!result.canceled && result.assets.length > 0) {
       setImage(result.assets[0].uri);
     }
   };
@@ -42,14 +59,17 @@ export default function ProfileScreen() {
       Alert.alert('Please complete all fields.');
       return;
     }
-
+    if (!isValidDate(dob)) {
+      Alert.alert('Invalid DOB', 'Please enter a valid date of birth (DD/MM/YYYY).');
+      return;
+    }
     const currentUser = auth.currentUser;
     if (!currentUser) {
       Alert.alert('Not logged in');
       return;
     }
-
     try {
+      // Fetch image as blob
       const blob: Blob = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.onload = () => resolve(xhr.response);
@@ -59,8 +79,10 @@ export default function ProfileScreen() {
         xhr.send(null);
       });
 
+      // Upload image using v9 storage API
       const storageRef = ref(storage, `profilePhotos/${uuid.v4()}.jpg`);
       await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+
       const imageUrl = await getDownloadURL(storageRef);
 
       await setDoc(doc(db, 'users', currentUser.uid), {
@@ -68,13 +90,14 @@ export default function ProfileScreen() {
         bio,
         dob,
         photo: imageUrl,
+        isPrivate,
         email: currentUser.email,
         createdAt: new Date().toISOString(),
       });
 
       router.replace('/home');
     } catch (err: any) {
-      console.error('Upload error:', JSON.stringify(err));
+      console.error('Upload error:', err);
       Alert.alert('Upload Failed', err.message || 'Unknown error');
     }
   };
@@ -82,22 +105,35 @@ export default function ProfileScreen() {
   return (
     <LinearGradient colors={['#f8f8f8', '#f2f2f2', '#fbe4c3']} style={styles.container}>
       <SafeAreaView style={{ flex: 1 }}>
-        {/* Go Back */}
         <TouchableOpacity onPress={() => router.replace('/')} style={styles.backButton}>
           <Text style={styles.backText}>← Go Back</Text>
         </TouchableOpacity>
-
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.title}>Complete Your Profile</Text>
           <TouchableOpacity onPress={pickImage} style={styles.imagePicker}>
             <LinearGradient colors={['#FF3D3D', '#FFBB00', '#00FFB3', '#00B0FF']} style={styles.gradientBorder}>
               <View style={styles.innerCircle}>
-                {image ? <Image source={{ uri: image }} style={styles.image} /> : <Text style={styles.plus}>+</Text>}
+                {image ? (
+                  <Image source={{ uri: image }} style={styles.image} />
+                ) : (
+                  <Text style={styles.plus}>+</Text>
+                )}
               </View>
             </LinearGradient>
           </TouchableOpacity>
-          <TextInput placeholder="Username" style={styles.input} value={username} onChangeText={setUsername} />
-          <TextInput placeholder="Bio" style={styles.input} value={bio} onChangeText={setBio} />
+          <TextInput
+            placeholder="Username"
+            style={styles.input}
+            value={username}
+            onChangeText={setUsername}
+            maxLength={20}
+          />
+          <TextInput
+            placeholder="Bio"
+            style={styles.input}
+            value={bio}
+            onChangeText={setBio}
+          />
           <TextInput
             placeholder="DOB (DD/MM/YYYY)"
             style={styles.input}
@@ -113,6 +149,10 @@ export default function ProfileScreen() {
               setDob(formatted);
             }}
           />
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>Private Account</Text>
+            <Switch value={isPrivate} onValueChange={setIsPrivate} />
+          </View>
           <TouchableOpacity onPress={handleContinue} style={styles.button}>
             <LinearGradient
               colors={['#FF3D3D', '#FFBB00', '#00FFB3', '#00B0FF']}
@@ -131,13 +171,8 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  backButton: {
-    padding: 20,
-  },
-  backText: {
-    fontSize: 16,
-    color: '#333',
-  },
+  backButton: { padding: 20 },
+  backText: { fontSize: 16, color: '#333' },
   content: { padding: 30, justifyContent: 'center' },
   title: { fontSize: 24, fontWeight: 'bold', marginBottom: 30, textAlign: 'center' },
   input: {
@@ -177,4 +212,15 @@ const styles = StyleSheet.create({
   },
   plus: { fontSize: 40, fontWeight: 'bold', color: '#000' },
   image: { width: 114, height: 114, borderRadius: 57 },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 20,
+  },
+  switchLabel: { fontSize: 16, color: '#333' },
 });
+

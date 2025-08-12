@@ -1,5 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import { createUserWithEmailAndPassword, sendEmailVerification, User } from 'firebase/auth';
+import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import React, { useState } from 'react';
 import {
   Alert,
@@ -8,28 +10,45 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity
+  TouchableOpacity,
 } from 'react-native';
-import { auth } from '../firebaseConfig';
+import { auth, db } from '../firebaseConfig';
 
-export default function SignUpScreen() {
+const createUserIfNotExists = async (user: User) => {
+  const userRef = doc(db, 'users', user.uid);
+  const snap = await getDoc(userRef);
+
+  if (!snap.exists()) {
+    await setDoc(userRef, {
+      username: user.email?.split('@')[0] || 'new_user',
+      email: user.email,
+      bio: '',
+      photo: '',
+      dob: '',
+      createdAt: Timestamp.now(),
+    });
+  }
+};
+
+function SignUpScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   const handleSignup = async () => {
     try {
-      const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
       if (user) {
-        await user.sendEmailVerification();
+        await createUserIfNotExists(user); // ✅ Create Firestore profile
+        await sendEmailVerification(user);
         router.push('/verifyEmail');
       }
     } catch (error: any) {
       if (error.code === 'auth/email-already-in-use') {
         const currentUser = auth.currentUser;
         if (currentUser && !currentUser.emailVerified) {
-          await currentUser.sendEmailVerification();
+          await sendEmailVerification(currentUser);
           Alert.alert('Email already registered', 'Verification email resent.');
           router.push('/verifyEmail');
         } else {
@@ -97,6 +116,7 @@ export default function SignUpScreen() {
     </KeyboardAvoidingView>
   );
 }
+export default SignUpScreen;
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 },

@@ -1,0 +1,101 @@
+diff --git a/node_modules/react-native/third-party-podspecs/RCT-Folly.podspec b/node_modules/react-native/third-party-podspecs/RCT-Folly.podspec
+index 8852179..067d93b 100644
+--- a/node_modules/react-native/third-party-podspecs/RCT-Folly.podspec
++++ b/node_modules/react-native/third-party-podspecs/RCT-Folly.podspec
+@@ -4,7 +4,7 @@
+ # LICENSE file in the root directory of this source tree.
+ 
+ folly_config = get_folly_config()
+-folly_config_file = folly_config[:config_file]
++folly_compiler_flags = folly_config[:compiler_flags]
+ folly_release_version = folly_config[:version]
+ folly_git_url = folly_config[:git]
+ 
+@@ -19,14 +19,19 @@ Pod::Spec.new do |spec|
+   spec.source = { :git => folly_git_url,
+                   :tag => "v#{folly_release_version}" }
+   spec.module_name = 'folly'
+-  spec.prepare_command = "echo '#{folly_config_file.join("\n")}' > folly/folly-config.h"
++
++  # Fix prepare_command to avoid nil join error
++  spec.prepare_command = "echo '' > folly/folly-config.h"
++
+   spec.header_mappings_dir = '.'
+-  spec.dependency "boost"
+-  spec.dependency "DoubleConversion"
+-  spec.dependency "glog"
+-  spec.dependency "fast_float", "8.0.0"
++  spec.dependency 'boost'
++  spec.dependency 'DoubleConversion'
++  spec.dependency 'glog'
++  spec.dependency "fast_float", "6.1.4"
+   spec.dependency "fmt", "11.0.2"
+-  spec.compiler_flags = '-Wno-documentation -faligned-new'
++
++  spec.compiler_flags = folly_compiler_flags + ' -DFOLLY_HAVE_PTHREAD=1 -Wno-documentation -faligned-new'
++
+   spec.source_files = 'folly/String.cpp',
+                       'folly/Conv.cpp',
+                       'folly/Demangle.cpp',
+@@ -71,9 +76,8 @@ Pod::Spec.new do |spec|
+                       'folly/net/*.h',
+                       'folly/net/detail/*.h',
+                       'folly/portability/*.h',
+-                      'folly/system/*.h',
++                      'folly/system/*.h'
+ 
+-  # workaround for https://github.com/facebook/react-native/issues/14326
+   spec.preserve_paths = 'folly/*.h',
+                         'folly/algorithm/simd/*.h',
+                         'folly/algorithm/simd/detail/*.h',
+@@ -90,23 +94,28 @@ Pod::Spec.new do |spec|
+                         'folly/net/*.h',
+                         'folly/net/detail/*.h',
+                         'folly/portability/*.h',
+-                        'folly/system/*.h',
+-  spec.libraries           = "c++abi" # NOTE Apple-only: Keep c++abi here due to https://github.com/react-native-community/releases/issues/251
+-  spec.pod_target_xcconfig = { "USE_HEADERMAP" => "NO",
+-                               "DEFINES_MODULE" => "YES",
+-                               "CLANG_CXX_LANGUAGE_STANDARD" => rct_cxx_language_standard(),
+-                               "HEADER_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)\" \"$(PODS_ROOT)/boost\" \"$(PODS_ROOT)/DoubleConversion\" \"$(PODS_ROOT)/fast_float/include\" \"$(PODS_ROOT)/fmt/include\"",
+-                               # In dynamic framework (use_frameworks!) mode, ignore the unused and undefined boost symbols when generating the library.
+-                               "OTHER_LDFLAGS" => "\"-Wl,-U,_jump_fcontext\" \"-Wl,-U,_make_fcontext\"",
+-                               "GCC_WARN_INHIBIT_ALL_WARNINGS" => "YES" # Disable warnings because we don't control this library
+-                             }
+-
+-  # TODO: The boost spec should really be selecting these files so that dependents of Folly can also access the required headers.
+-  spec.user_target_xcconfig = { "HEADER_SEARCH_PATHS" => "\"$(PODS_ROOT)/boost\"" }
++                        'folly/system/*.h'
++
++  spec.libraries = "c++abi" # Apple-only
++
++  spec.pod_target_xcconfig = {
++    "USE_HEADERMAP" => "NO",
++    "DEFINES_MODULE" => "YES",
++    "CLANG_CXX_LANGUAGE_STANDARD" => rct_cxx_language_standard(),
++    "HEADER_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)\" \"$(PODS_ROOT)/boost\" \"$(PODS_ROOT)/DoubleConversion\" \"$(PODS_ROOT)/fast_float/include\" \"$(PODS_ROOT)/fmt/include\"",
++    "OTHER_LDFLAGS" => "\"-Wl,-U,_jump_fcontext\" \"-Wl,-U,_make_fcontext\"",
++    "GCC_WARN_INHIBIT_ALL_WARNINGS" => "YES"
++  }
++
++  spec.user_target_xcconfig = {
++    "HEADER_SEARCH_PATHS" => "\"$(PODS_ROOT)/boost\""
++  }
+ 
+   spec.default_subspec = 'Default'
+ 
+-  spec.resource_bundles = {'RCT-Folly_privacy' => 'RCT-Folly/PrivacyInfo.xcprivacy'}
++  spec.resource_bundles = {
++    'RCT-Folly_privacy' => 'RCT-Folly/PrivacyInfo.xcprivacy'
++  }
+ 
+   spec.subspec 'Default' do
+     # no-op
+@@ -126,7 +135,5 @@ Pod::Spec.new do |spec|
+                             'folly/system/ThreadId.h'
+   end
+ 
+-  # Folly has issues when compiled with iOS 10 set as deployment target
+-  # See https://github.com/facebook/folly/issues/1470 for details
+   spec.platforms = min_supported_versions
+ end

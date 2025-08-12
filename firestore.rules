@@ -1,0 +1,207 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Comments collection
+    match /comments/{commentId} {
+      // Allow read access to all users
+      allow read: if true;
+      
+      // Allow create and update access to authenticated users
+      allow create, update: if request.auth != null;
+      
+      // Temporarily allow all authenticated users to delete for debugging
+      // TODO: Restore proper ownership check after debugging userId field
+      allow delete: if request.auth != null;
+      
+      // Comment likes subcollection
+      match /likes/{userId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+    
+    // Posts collection  
+    match /posts/{postId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+      
+      // Post likes subcollection
+      match /likes/{userId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+      // Allow authenticated users to update follower/following counts for follow system
+      allow update: if request.auth != null && 
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers', 'following']));
+    }
+    
+    // Reports collection
+    match /reports/{reportId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Comment reports collection
+    match /commentReports/{reportId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Replies collection (for now, simplified)
+    match /replies/{replyId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    // Videos collection for Mux uploads
+    match /videos/{videoId} {
+      allow read: if true;
+      allow create, update: if request.auth != null;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+    
+    // Likes collection for video likes
+    match /likes/{likeId} {
+      allow read: if true;
+      allow create, delete: if request.auth != null;
+      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+    
+    // Saves collection for saved videos
+    match /saves/{saveId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Saved videos collection
+    match /savedVideos/{savedVideoId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Shares collection for video shares
+    match /shares/{shareId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // User profiles collection for algorithmic feed
+    match /userProfiles/{userId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Engagement metrics collection
+    match /engagementMetrics/{videoId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // User engagement collection
+    match /userEngagement/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Video views collection
+    match /videoViews/{viewId} {
+      allow read: if true;
+      allow create, update: if request.auth != null;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // View progress tracking collection
+    match /viewProgress/{progressId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // View tracking sessions collection
+    match /viewTrackingSessions/{sessionId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // User interactions collection for algorithmic learning
+    match /userInteractions/{interactionId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create, update: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // Follow relationships collection
+    match /follows/{followId} {
+      allow read: if true;
+      allow create, delete: if request.auth != null;
+      allow update: if request.auth != null && request.auth.uid == resource.data.followerId;
+    }
+
+    // Content preferences collection
+    match /contentPreferences/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Video metrics collection for performance tracking
+    match /videoMetrics/{videoId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // User interactions collection for algorithmic learning
+    match /userInteractions/{interactionId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create, update: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // View tracking collections
+    match /views/{viewId} {
+      allow read: if true; // Views can be read by anyone for analytics
+      allow create: if true; // Anyone can create view records (including anonymous users)
+      allow update, delete: if false; // Views should not be modified once created
+    }
+
+    match /viewLogs/{logId} {
+      allow read: if request.auth != null; // Only authenticated users can read view logs
+      allow create: if true; // Anyone can create view logs (including anonymous users)
+      allow update, delete: if false; // View logs should not be modified once created
+    }
+
+    // Video analytics collection
+    match /videoAnalytics/{videoId} {
+      allow read: if true; // Analytics can be read by anyone
+      allow write: if true; // Allow system to update analytics
+    }
+
+    // User counters collection (for profile stats)
+    match /user_counters/{userId} {
+      allow read: if true; // Anyone can read public stats
+      allow write: if request.auth != null; // Only authenticated users can update
+    }
+
+    // Follows collection (for follow relationships)
+    match /follows/{followId} {
+      allow read: if request.auth != null; // Authenticated users can read follows
+      allow create: if request.auth != null; // Authenticated users can create follows
+      allow update: if request.auth != null; // Authenticated users can update follow status
+      allow delete: if request.auth != null; // Authenticated users can unfollow
+    }
+
+    // Blocks collection (for blocking users)
+    match /blocks/{blockId} {
+      allow read: if request.auth != null; // Authenticated users can read blocks
+      allow create: if request.auth != null; // Authenticated users can block others
+      allow delete: if request.auth != null; // Authenticated users can unblock
+    }
+  }
+}

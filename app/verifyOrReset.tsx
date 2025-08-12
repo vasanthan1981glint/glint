@@ -1,8 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
+import { applyActionCode } from 'firebase/auth';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { auth } from '../firebaseConfig';
 
 export default function VerifyOrResetScreen() {
   const { mode, oobCode } = useLocalSearchParams();
@@ -18,7 +18,7 @@ export default function VerifyOrResetScreen() {
     const handleAction = async () => {
       try {
         if (mode === 'verifyEmail') {
-          await firebase.auth().applyActionCode(oobCode as string);
+          await applyActionCode(auth, oobCode as string);
           setMessage('Email verified successfully!');
           setTimeout(() => router.replace('/profile'), 2000);
         } else if (mode === 'resetPassword') {

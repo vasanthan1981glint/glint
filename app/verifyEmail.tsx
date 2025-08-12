@@ -1,11 +1,12 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { sendEmailVerification } from 'firebase/auth';
 import { useEffect } from 'react';
 import {
-  Alert,
-  StyleSheet,
-  Text,
-  TouchableOpacity
+    Alert,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
 } from 'react-native';
 import { auth } from '../firebaseConfig';
 
@@ -41,16 +42,31 @@ export default function VerifyEmailScreen() {
 
   const resendVerification = async () => {
     try {
-      await auth.currentUser?.sendEmailVerification();
-      Alert.alert('Verification email sent again.');
+      if (auth.currentUser) {
+        await sendEmailVerification(auth.currentUser);
+        Alert.alert('Verification email sent again.');
+      }
     } catch (err: any) {
       Alert.alert('Error', err.message);
     }
   };
 
+  const handleManualCheck = async () => {
+    try {
+      await auth.currentUser?.reload();
+      if (auth.currentUser?.emailVerified) {
+        router.replace('/profile');
+      } else {
+        Alert.alert('Still Not Verified', 'Please verify your email and try again.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to check status.');
+    }
+  };
+
   return (
     <LinearGradient
-      colors={['#f8f8f8', '#f2f2f2', '#fbe4c3']} // same as index screen
+      colors={['#f8f8f8', '#f2f2f2', '#fbe4c3']}
       start={{ x: 0.5, y: 0 }}
       end={{ x: 0.5, y: 1 }}
       style={styles.container}
@@ -70,6 +86,17 @@ export default function VerifyEmailScreen() {
           style={styles.gradientButton}
         >
           <Text style={styles.buttonText}>Resend Verification Email</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={handleManualCheck} style={styles.button}>
+        <LinearGradient
+          colors={['#FF3D3D', '#FFBB00', '#00FFB3', '#00B0FF']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.gradientButton}
+        >
+          <Text style={styles.buttonText}>Continue</Text>
         </LinearGradient>
       </TouchableOpacity>
     </LinearGradient>
