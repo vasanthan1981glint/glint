@@ -343,6 +343,72 @@ app.post('/api/mux/create-upload', async (req, res) => {
 });
 
 /**
+ * GET /api/mux/upload/:uploadId
+ * Gets upload status and associated asset information
+ */
+app.get('/api/mux/upload/:uploadId', async (req, res) => {
+  try {
+    const { uploadId } = req.params;
+    console.log('📋 Fetching upload info for:', uploadId);
+
+    const upload = await mux.video.uploads.retrieve(uploadId);
+    
+    console.log('📊 Upload details:', {
+      id: upload.id,
+      status: upload.status,
+      asset_id: upload.asset_id,
+      created_at: upload.created_at,
+      error: upload.error || null
+    });
+
+    let asset = null;
+    if (upload.asset_id) {
+      try {
+        asset = await mux.video.assets.retrieve(upload.asset_id);
+        console.log('📊 Associated asset details:', {
+          id: asset.id,
+          status: asset.status,
+          duration: asset.duration,
+          playback_ids: asset.playback_ids?.length || 0,
+          errors: asset.errors?.length || 0
+        });
+      } catch (assetError) {
+        console.warn('⚠️ Could not fetch associated asset:', assetError.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      upload: {
+        id: upload.id,
+        status: upload.status,
+        asset_id: upload.asset_id,
+        created_at: upload.created_at,
+        error: upload.error || null
+      },
+      asset: asset ? {
+        id: asset.id,
+        status: asset.status,
+        duration: asset.duration,
+        aspect_ratio: asset.aspect_ratio,
+        playback_ids: asset.playback_ids,
+        created_at: asset.created_at,
+        metadata: asset.metadata,
+        errors: asset.errors || []
+      } : null
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching upload:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch upload',
+      details: error.message 
+    });
+  }
+});
+
+/**
  * GET /api/mux/asset/:assetId
  * Gets asset information including playback IDs
  */
