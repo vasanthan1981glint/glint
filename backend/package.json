@@ -1,0 +1,30 @@
+{
+  "name": "glint-mux-backend",
+  "version": "1.0.0",
+  "description": "Backend server for Glint app with Mux integration",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "echo 'No build step required'",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@mux/mux-node": "^8.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.18.0",
+    "firebase-admin": "^12.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "keywords": [
+    "mux",
+    "video",
+    "react-native",
+    "backend"
+  ],
+  "author": "Your Name",
+  "license": "ISC"
+}
