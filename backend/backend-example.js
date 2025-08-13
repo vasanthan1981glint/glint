@@ -100,7 +100,7 @@ router.get('/videos', async (req, res) => {
       metadata: asset.metadata,
       // Generate playback and thumbnail URLs
       playback_url: asset.playback_ids?.[0] 
-        ? `https://stream.mux.com/${asset.playback_ids[0].id}.mp4`
+        ? `https://stream.mux.com/${asset.playback_ids[0].id}.m3u8`
         : null,
       thumbnail_url: asset.playback_ids?.[0]
         ? `https://image.mux.com/${asset.playback_ids[0].id}/thumbnail.jpg?time=1&width=320&height=180&fit_mode=crop`

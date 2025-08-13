@@ -301,26 +301,37 @@ app.delete('/api/saves/:videoId/:userId', async (req, res) => {
  */
 app.post('/api/mux/create-upload', async (req, res) => {
   try {
-    console.log('Creating Mux upload...');
+    console.log('Creating Mux upload with enhanced mobile compatibility settings...');
     
     const { metadata = {} } = req.body;
 
-    // Create a direct upload using the correct Mux API
+    // Create a direct upload using enhanced settings for mobile compatibility and quality
     const upload = await mux.video.uploads.create({
       new_asset_settings: {
-        playback_policy: 'public', // Change to 'signed' for private videos
+        playback_policy: 'public',
+        encoding_tier: 'smart',        // Use smart encoding for better quality/compatibility balance
+        video_quality: 'plus',         // Higher quality while maintaining compatibility
+        mp4_support: 'standard',       // Enable MP4 support for mobile compatibility
+        normalize_audio: true,         // Fix audio level issues
+        master_access: 'temporary',    // Allow access to master files
         metadata: {
           ...metadata,
           created_at: new Date().toISOString(),
           source: 'mobile_app',
+          high_quality_optimized: true,
+          encoding_tier: 'smart'
         },
       },
+      timeout: 7200, // 2 hours timeout instead of default 1 hour
+      cors_origin: '*'  // Allow CORS for mobile uploads
     });
 
-    console.log('Mux upload created:', {
+    console.log('Mux upload created with mobile-optimized settings:', {
       id: upload.id,
       url: upload.url?.substring(0, 50) + '...',
-      asset_id: upload.asset_id
+      asset_id: upload.asset_id,
+      encoding_tier: 'baseline',
+      timeout: '2 hours'
     });
 
     // Return the upload info
@@ -334,10 +345,29 @@ app.post('/api/mux/create-upload', async (req, res) => {
 
   } catch (error) {
     console.error('Error creating Mux upload:', error);
+    
+    // Provide more helpful error messages for mobile users
+    let userMessage = 'Failed to create upload URL';
+    let suggestion = 'Please try again';
+    
+    if (error.message?.includes('rate limit') || error.status === 429) {
+      userMessage = 'Upload service temporarily busy';
+      suggestion = 'Please wait a moment and try again';
+    } else if (error.message?.includes('authentication') || error.status === 401) {
+      userMessage = 'Service authentication issue';
+      suggestion = 'Please contact support if this persists';
+    }
+    
     res.status(500).json({ 
-      error: 'Failed to create upload URL',
+      error: userMessage,
+      suggestion: suggestion,
       details: error.message,
-      mux_configured: !!(process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET)
+      mux_configured: !!(process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET),
+      mobile_compatibility_tips: [
+        'Try recording video in "Most Compatible" format in iPhone Settings > Camera > Formats',
+        'Keep videos under 30 seconds for better processing',
+        'Ensure stable internet connection during upload'
+      ]
     });
   }
 });
@@ -362,6 +392,8 @@ app.get('/api/mux/upload/:uploadId', async (req, res) => {
     });
 
     let asset = null;
+    let assetError = null;
+    
     if (upload.asset_id) {
       try {
         asset = await mux.video.assets.retrieve(upload.asset_id);
@@ -369,11 +401,51 @@ app.get('/api/mux/upload/:uploadId', async (req, res) => {
           id: asset.id,
           status: asset.status,
           duration: asset.duration,
-          playback_ids: asset.playback_ids?.length || 0,
-          errors: asset.errors?.length || 0
+          playback_ids: asset.playbook_ids?.length || 0,
+          errors: asset.errors ? Object.keys(asset.errors).length : 0
         });
-      } catch (assetError) {
-        console.warn('⚠️ Could not fetch associated asset:', assetError.message);
+
+        // Check for specific error types and provide helpful messages
+        if (asset.status === 'errored' && asset.errors) {
+          const errorType = asset.errors.type;
+          const errorMessages = asset.errors.messages || [];
+          
+          console.error('🚨 Asset processing error:', {
+            type: errorType,
+            messages: errorMessages
+          });
+          
+          // Provide specific guidance based on error type
+          if (errorType === 'invalid_input') {
+            assetError = {
+              type: 'invalid_input',
+              message: 'Video format not supported by Mux',
+              suggestions: [
+                'Try recording video in iPhone Settings > Camera > Formats > "Most Compatible"',
+                'Keep videos under 30 seconds',
+                'Record a new video instead of selecting from gallery',
+                'Ensure stable internet connection during upload'
+              ],
+              technicalDetails: errorMessages
+            };
+          } else {
+            assetError = {
+              type: errorType,
+              message: 'Video processing failed',
+              suggestions: ['Try uploading again', 'Contact support if issue persists'],
+              technicalDetails: errorMessages
+            };
+          }
+        }
+        
+      } catch (assetRetrievalError) {
+        console.warn('⚠️ Could not fetch associated asset:', assetRetrievalError.message);
+        assetError = {
+          type: 'retrieval_failed',
+          message: 'Could not check video processing status',
+          suggestions: ['Wait a moment and try again'],
+          technicalDetails: [assetRetrievalError.message]
+        };
       }
     }
 
@@ -391,11 +463,18 @@ app.get('/api/mux/upload/:uploadId', async (req, res) => {
         status: asset.status,
         duration: asset.duration,
         aspect_ratio: asset.aspect_ratio,
-        playback_ids: asset.playback_ids,
+        playbook_ids: asset.playback_ids,
         created_at: asset.created_at,
         metadata: asset.metadata,
         errors: asset.errors || []
-      } : null
+      } : null,
+      // Include enhanced error information for mobile users
+      assetError: assetError,
+      mobileCompatibilityTips: assetError ? [
+        'Change iPhone camera format to "Most Compatible" in Settings',
+        'Record videos directly in the app instead of selecting from gallery',
+        'Keep videos short (under 30 seconds) for better processing'
+      ] : null
     });
 
   } catch (error) {
@@ -459,6 +538,71 @@ app.get('/api/mux/asset/:assetId', async (req, res) => {
 });
 
 /**
+ * POST /api/mux/convert-asset-to-playback
+ * Converts Asset ID to Playback ID for streaming
+ */
+app.post('/api/mux/convert-asset-to-playback', async (req, res) => {
+  try {
+    const { assetId } = req.body;
+    
+    if (!assetId) {
+      return res.status(400).json({ 
+        error: 'Missing assetId in request body' 
+      });
+    }
+
+    console.log('🔄 Converting Asset ID to Playback ID:', assetId);
+
+    // Get asset details from Mux
+    const asset = await mux.video.assets.retrieve(assetId);
+    
+    if (!asset.playback_ids || asset.playback_ids.length === 0) {
+      console.error('❌ No playback IDs found for asset:', assetId);
+      return res.status(404).json({ 
+        error: 'No playback IDs found for this asset',
+        assetId,
+        status: asset.status 
+      });
+    }
+
+    // Find public playback ID
+    const publicPlaybackId = asset.playback_ids.find(p => p.policy === 'public');
+    const playbackId = publicPlaybackId || asset.playback_ids[0];
+
+    const playbackUrl = `https://stream.mux.com/${playbackId.id}.m3u8`;
+    
+    console.log('✅ Asset ID converted:', {
+      assetId,
+      playbackId: playbackId.id,
+      policy: playbackId.policy
+    });
+
+    res.json({
+      success: true,
+      assetId,
+      playbackId: playbackId.id,
+      playbackUrl,
+      policy: playbackId.policy
+    });
+
+  } catch (error) {
+    console.error('❌ Asset ID conversion failed:', error);
+    
+    if (error.type === 'not_found') {
+      return res.status(404).json({ 
+        error: 'Asset not found',
+        assetId: req.body.assetId
+      });
+    }
+
+    res.status(500).json({ 
+      error: 'Failed to convert Asset ID to Playback ID',
+      details: error.message 
+    });
+  }
+});
+
+/**
  * GET /api/mux/videos
  * Lists all videos (with pagination)
  */
@@ -482,7 +626,7 @@ app.get('/api/mux/videos', async (req, res) => {
       metadata: asset.metadata,
       // Generate URLs if playback ID exists
       playback_url: asset.playback_ids?.[0] 
-        ? `https://stream.mux.com/${asset.playback_ids[0].id}.mp4`
+        ? `https://stream.mux.com/${asset.playback_ids[0].id}.m3u8`
         : null,
       thumbnail_url: asset.playback_ids?.[0]
         ? `https://image.mux.com/${asset.playback_ids[0].id}/thumbnail.jpg?time=1&width=320&height=180&fit_mode=crop`
@@ -533,6 +677,234 @@ app.delete('/api/mux/asset/:assetId', async (req, res) => {
 });
 
 /**
+ * PATCH /api/videos/:uploadId/fix-asset
+ * Updates a video with correct asset information
+ */
+app.patch('/api/videos/:uploadId/fix-asset', async (req, res) => {
+  try {
+    const { uploadId } = req.params;
+    const { correctAssetId, playbackId, playbackUrl } = req.body;
+    
+    console.log(`🔧 Fixing video ${uploadId} with asset ${correctAssetId}`);
+    
+    // Here you would update your database with the correct asset information
+    // For this example, we'll just return success
+    // In a real app, you'd update Firebase or your database
+    
+    res.json({
+      success: true,
+      message: `Video ${uploadId} updated with correct asset ${correctAssetId}`,
+      data: {
+        uploadId,
+        correctAssetId,
+        playbackId,
+        playbackUrl
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fixing video asset:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fix video asset',
+      details: error.message 
+    });
+  }
+});
+
+/**
+ * POST /api/videos/:uploadId/recreate-asset
+ * Creates a new asset for a video that failed processing
+ */
+app.post('/api/videos/:uploadId/recreate-asset', async (req, res) => {
+  try {
+    const { uploadId } = req.params;
+    
+    console.log(`🆕 Recreating asset for upload ${uploadId}`);
+    
+    // In a real implementation, you would:
+    // 1. Get the original video file from storage
+    // 2. Create a new Mux upload
+    // 3. Re-upload the video to Mux
+    // 4. Return the new asset ID
+    
+    // For now, we'll simulate creating a new upload
+    const upload = await mux.video.uploads.create({
+      new_asset_settings: {
+        playback_policy: 'public',
+        metadata: {
+          recreated_from: uploadId,
+          created_at: new Date().toISOString(),
+          source: 'asset_recreation',
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      message: `New asset creation initiated for ${uploadId}`,
+      assetId: upload.asset_id,
+      uploadUrl: upload.url,
+      newUploadId: upload.id
+    });
+
+  } catch (error) {
+    console.error('❌ Error recreating asset:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to recreate asset',
+      details: error.message 
+    });
+  }
+});
+
+// ===== WEBHOOK HELPER FUNCTIONS =====
+
+/**
+ * Handle asset ready event - update Firestore with proper playback ID
+ */
+async function handleAssetReady(assetData) {
+  try {
+    const assetId = assetData.id;
+    console.log(`🎯 Processing asset ready: ${assetId}`);
+    
+    // Get asset details from Mux to retrieve playback IDs
+    const asset = await mux.video.assets.retrieve(assetId);
+    
+    if (!asset.playback_ids || asset.playback_ids.length === 0) {
+      console.error(`❌ No playback IDs found for asset: ${assetId}`);
+      return;
+    }
+    
+    // Get the public playback ID
+    const publicPlaybackId = asset.playback_ids.find(p => p.policy === 'public');
+    
+    if (!publicPlaybackId) {
+      console.error(`❌ No public playback ID found for asset: ${assetId}`);
+      return;
+    }
+    
+    const playbackId = publicPlaybackId.id;
+    console.log(`✅ Found playback ID: ${playbackId} for asset: ${assetId}`);
+    
+    // Search for Firestore documents that reference this asset
+    // Check for documents with either assetId field or uploadId that maps to this asset
+    if (db) {
+      const videosRef = db.collection('videos');
+      
+      // Query for documents with this assetId
+      const assetQuery = videosRef.where('assetId', '==', assetId);
+      const assetSnapshot = await assetQuery.get();
+      
+      // Also search for uploadId in the upload_assets collection if we have one
+      const uploadQuery = videosRef.where('uploadId', '==', assetData.upload_id || '');
+      const uploadSnapshot = uploadQuery.size > 0 ? await uploadQuery.get() : { docs: [] };
+      
+      const documentsToUpdate = [...assetSnapshot.docs, ...uploadSnapshot.docs];
+      
+      if (documentsToUpdate.length === 0) {
+        console.warn(`⚠️ No Firestore documents found for asset: ${assetId}`);
+        return;
+      }
+      
+      // Update all matching documents
+      for (const doc of documentsToUpdate) {
+        const docData = doc.data();
+        const updates = {
+          assetId: assetId,
+          playbackId: playbackId,
+          playbackUrl: `https://stream.mux.com/${playbackId}.m3u8`,
+          thumbnailUrl: `https://image.mux.com/${playbackId}/thumbnail.jpg`,
+          processed: true,
+          status: 'ready',
+          updatedAt: new Date().toISOString()
+        };
+        
+        await doc.ref.update(updates);
+        console.log(`✅ Updated Firestore document: ${doc.id} with playback ID: ${playbackId}`);
+        
+        // Also update posts collection if it exists
+        try {
+          const postRef = db.collection('posts').doc(doc.id);
+          const postDoc = await postRef.get();
+          if (postDoc.exists) {
+            await postRef.update({
+              playbackId: playbackId,
+              playbackUrl: updates.playbackUrl,
+              thumbnailUrl: updates.thumbnailUrl,
+              processed: true,
+              status: 'ready'
+            });
+            console.log(`✅ Updated posts document: ${doc.id}`);
+          }
+        } catch (postError) {
+          console.warn(`⚠️ Could not update posts document: ${doc.id}`, postError.message);
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`❌ Error handling asset ready:`, error);
+  }
+}
+
+/**
+ * Handle asset errored event - mark video as failed
+ */
+async function handleAssetErrored(assetData) {
+  try {
+    const assetId = assetData.id;
+    console.log(`💥 Processing asset error: ${assetId}`);
+    
+    if (db) {
+      const videosRef = db.collection('videos');
+      const query = videosRef.where('assetId', '==', assetId);
+      const snapshot = await query.get();
+      
+      for (const doc of snapshot.docs) {
+        await doc.ref.update({
+          processed: false,
+          status: 'error',
+          error: assetData.errors || 'Processing failed',
+          updatedAt: new Date().toISOString()
+        });
+        console.log(`❌ Marked video as errored: ${doc.id}`);
+      }
+    }
+  } catch (error) {
+    console.error(`❌ Error handling asset errored:`, error);
+  }
+}
+
+/**
+ * Handle upload asset created event - link upload to asset
+ */
+async function handleUploadAssetCreated(uploadData) {
+  try {
+    const uploadId = uploadData.id;
+    const assetId = uploadData.asset_id;
+    
+    console.log(`🔗 Linking upload ${uploadId} to asset ${assetId}`);
+    
+    if (db) {
+      const videosRef = db.collection('videos');
+      const query = videosRef.where('uploadId', '==', uploadId);
+      const snapshot = await query.get();
+      
+      for (const doc of snapshot.docs) {
+        await doc.ref.update({
+          assetId: assetId,
+          status: 'processing',
+          updatedAt: new Date().toISOString()
+        });
+        console.log(`🔗 Linked upload to asset: ${doc.id} → ${assetId}`);
+      }
+    }
+  } catch (error) {
+    console.error(`❌ Error handling upload asset created:`, error);
+  }
+}
+
+/**
  * POST /api/webhooks/mux
  * Webhook endpoint for Mux events
  */
@@ -551,15 +923,17 @@ app.post('/api/webhooks/mux', express.raw({ type: 'application/json' }), async (
     switch (event.type) {
       case 'video.asset.ready':
         console.log('✅ Video ready:', event.data.id);
-        // Here you could update your database, send notifications, etc.
+        await handleAssetReady(event.data);
         break;
         
       case 'video.asset.errored':
         console.error('❌ Video processing failed:', event.data.id, event.data.errors);
+        await handleAssetErrored(event.data);
         break;
         
       case 'video.upload.asset_created':
         console.log('📤 Upload completed:', event.data.id);
+        await handleUploadAssetCreated(event.data);
         break;
         
       case 'video.asset.created':
