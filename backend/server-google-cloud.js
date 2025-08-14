@@ -5,24 +5,13 @@ const { Storage } = require('@google-cloud/storage');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Initialize Google Cloud Storage
-let storage;
-try {
-  if (process.env.GOOGLE_CLOUD_CREDENTIALS) {
-    const credentials = JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS);
-    storage = new Storage({
-      projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'glint-7e3c3',
-      credentials: credentials
-    });
-    console.log('✅ Google Cloud Storage initialized with credentials');
-  } else {
-    console.log('❌ No Google Cloud credentials found');
-    storage = null;
-  }
-} catch (error) {
-  console.error('❌ Google Cloud Storage initialization error:', error);
-  storage = null;
-}
+// Initialize Google Cloud Storage using environment variables
+const storage = new Storage({
+  projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+  keyFilename: undefined, // Use environment variable instead
+  credentials: JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS || '{}')
+});
+const bucket = storage.bucket(process.env.GOOGLE_CLOUD_BUCKET);
 
 app.use(cors());
 app.use(express.json());
