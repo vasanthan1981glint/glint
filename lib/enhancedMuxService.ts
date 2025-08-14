@@ -29,9 +29,99 @@ export interface VideoAsset {
 }
 
 class EnhancedMuxService {
-  private apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.159:3000';
+  private apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://truthful-upliftment-production.up.railway.app';
+  private googleCloudUrl = 'https://truthful-upliftment-production.up.railway.app'; // Your new Google Cloud backend
 
-  // Check if backend is available
+  // Check if Google Cloud backend is available
+  async checkGoogleCloudHealth(): Promise<boolean> {
+    try {
+      console.log('☁️ Checking Google Cloud backend health at:', this.googleCloudUrl);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(`${this.googleCloudUrl}/health`, { 
+        signal: controller.signal 
+      });
+      
+      clearTimeout(timeoutId);
+      const data = await response.json();
+      console.log('☁️ Google Cloud health check:', data);
+      return data.status === 'healthy' && data.service === 'Google Cloud Storage';
+    } catch (error) {
+      console.log('⚠️ Google Cloud backend not available:', error);
+      return false;
+    }
+  }
+
+  // Google Cloud upload method
+  async uploadToGoogleCloud(videoUri: string, onProgress: (progress: UploadProgress) => void): Promise<VideoAsset> {
+    try {
+      console.log('☁️ Starting Google Cloud upload...');
+      
+      onProgress({
+        progress: 10,
+        stage: 'uploading',
+        message: 'Creating Google Cloud upload URL...'
+      });
+
+      // Get signed URL from Google Cloud backend
+      const response = await fetch(`${this.googleCloudUrl}/upload/signed-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: `video_${Date.now()}.mp4`,
+          contentType: 'video/mp4'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to get upload URL: ${response.status}`);
+      }
+
+      const { uploadUrl, videoUrl, fileName } = await response.json();
+
+      onProgress({
+        progress: 20,
+        stage: 'uploading',
+        message: 'Uploading to Google Cloud Storage...'
+      });
+
+      // Upload video to Google Cloud Storage
+      const videoBlob = await fetch(videoUri).then(r => r.blob());
+      
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        body: videoBlob,
+        headers: { 'Content-Type': 'video/mp4' }
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload failed: ${uploadResponse.status}`);
+      }
+
+      onProgress({
+        progress: 100,
+        stage: 'complete',
+        message: 'Upload complete!'
+      });
+
+      return {
+        id: fileName,
+        assetId: fileName,
+        playbackUrl: videoUrl,
+        thumbnailUrl: `${videoUrl}?thumbnail=true`,
+        status: 'ready',
+        uploadTime: new Date().toISOString(),
+        storage: 'google-cloud'
+      };
+
+    } catch (error: any) {
+      console.error('❌ Google Cloud upload failed:', error);
+      throw error;
+    }
+  }
+
+  // Check if backend is available (existing method for Mux)
   async checkBackendHealth(): Promise<boolean> {
     try {
       console.log('🏥 Checking Mux backend health at:', this.apiUrl);
@@ -288,7 +378,26 @@ class EnhancedMuxService {
         });
       }
 
-      // Check if real Mux backend is available FIRST (priority)
+      // Check if Google Cloud backend is available FIRST (new priority)
+      const hasGoogleCloud = await this.checkGoogleCloudHealth();
+      
+      if (hasGoogleCloud) {
+        console.log('☁️ Using Google Cloud Storage for reliable video hosting (80% cheaper than Mux!)');
+        try {
+          return await this.uploadToGoogleCloud(videoUri, onProgress);
+        } catch (googleCloudError: any) {
+          console.warn('⚠️ Google Cloud upload failed, trying Firebase fallback:', googleCloudError.message);
+          
+          // Show user that we're falling back
+          onProgress({
+            progress: 10,
+            stage: 'uploading',
+            message: 'Primary upload failed, trying backup method...'
+          });
+        }
+      }
+
+      // Check if real Mux backend is available (secondary fallback)
       const hasRealMux = await this.checkBackendHealth();
       
       if (hasRealMux) {
