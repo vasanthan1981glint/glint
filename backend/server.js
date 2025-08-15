@@ -48,7 +48,17 @@ const configureBucket = async () => {
       ],
     });
     
-    console.log(`✅ Bucket ${bucketName} configured for public access`);
+    // Set CORS for web and mobile access
+    await bucket.setCorsConfiguration([
+      {
+        maxAgeSeconds: 3600,
+        method: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+        origin: ['*'],
+        responseHeader: ['Content-Type', 'Access-Control-Allow-Origin'],
+      },
+    ]);
+    
+    console.log(`✅ Bucket ${bucketName} configured for public access with CORS`);
   } catch (error) {
     console.log(`⚠️ Bucket policy setup: ${error.message}`);
   }
@@ -79,11 +89,11 @@ app.post('/upload/signed-url', async (req, res) => {
       });
     }
 
-    const { fileName, contentType } = req.body;
+    const { fileName, contentType, userId } = req.body;
     const bucketName = process.env.GOOGLE_CLOUD_BUCKET || 'glint-videos';
     
     const bucket = storage.bucket(bucketName);
-    const uniqueFileName = `videos/${Date.now()}-${fileName || 'video.mp4'}`;
+    const uniqueFileName = `videos/${userId || 'anonymous'}/${Date.now()}-${fileName || 'video.mp4'}`;
     const file = bucket.file(uniqueFileName);
     
     // Generate signed URL for upload (15 minutes)
@@ -112,6 +122,16 @@ app.post('/upload/signed-url', async (req, res) => {
 
     console.log(`📤 Generated upload URL for: ${uniqueFileName}`);
     console.log(`🌍 Public URL: ${publicUrl}`);
+    
+    // Make file public after a short delay (async)
+    setTimeout(async () => {
+      try {
+        await file.makePublic();
+        console.log(`✅ Made file public: ${uniqueFileName}`);
+      } catch (error) {
+        console.log(`⚠️ Could not make file public automatically: ${error.message}`);
+      }
+    }, 2000);
     
   } catch (error) {
     console.error('❌ Upload URL generation error:', error);

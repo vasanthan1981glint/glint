@@ -371,7 +371,8 @@ function MyProfileScreen() {
         },
         body: JSON.stringify({
           fileName: `video_${Date.now()}.mp4`,
-          contentType: 'video/mp4'
+          contentType: 'video/mp4',
+          userId: currentUser.uid
         }),
       });
 
@@ -422,7 +423,8 @@ function MyProfileScreen() {
             },
             body: JSON.stringify({
               fileName: `thumbnail_${Date.now()}.jpg`,
-              contentType: 'image/jpeg'
+              contentType: 'image/jpeg',
+              userId: currentUser.uid
             }),
           });
 
