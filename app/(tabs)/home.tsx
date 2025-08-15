@@ -156,7 +156,9 @@ const getResponsiveSize = () => {
 
 interface VideoData {
   assetId: string;
+  videoId?: string; // Google Cloud uses videoId
   playbackUrl: string;
+  streamingUrl?: string; // Google Cloud uses streamingUrl
   thumbnailUrl: string;
   username: string;
   userId: string;
@@ -227,6 +229,7 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
   const [videoLoading, setVideoLoading] = useState<{ [key: string]: boolean }>({});
   const [videoBuffering, setVideoBuffering] = useState<{ [key: string]: boolean }>({});
   const [videoLoadStates, setVideoLoadStates] = useState<{ [key: string]: 'loading' | 'loaded' | 'error' | 'codec-error' }>({});
+  const [videoRetryCount, setVideoRetryCount] = useState<{ [key: string]: number }>({});
   
   // Enhanced video metadata for complete processing pipeline
   const [videoMetadata, setVideoMetadata] = useState<{ [key: string]: { 
@@ -268,6 +271,13 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
   // User profiles state for real user data
   const [userProfiles, setUserProfiles] = useState<{ [userId: string]: UserProfile }>({});
   const [profilesLoading, setProfilesLoading] = useState<{ [userId: string]: boolean }>({});
+
+  // YouTube Shorts-style progress bar state
+  const [showProgressBar, setShowProgressBar] = useState<{ [key: string]: boolean }>({});
+  const [progressBarVisible, setProgressBarVisible] = useState<{ [key: string]: boolean }>({});
+  const [isDraggingProgress, setIsDraggingProgress] = useState<{ [key: string]: boolean }>({});
+  const [dragProgress, setDragProgress] = useState<{ [key: string]: number }>({});
+  const progressBarTimeoutRefs = useRef<{ [key: string]: ReturnType<typeof setTimeout> }>({});
 
   // Get video ref callback for proper cleanup
 
@@ -337,6 +347,12 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
       if (controlsTimeoutRef.current) {
         clearTimeout(controlsTimeoutRef.current);
       }
+      
+      // Clear all progress bar timeouts
+      Object.values(progressBarTimeoutRefs.current).forEach(timeout => {
+        if (timeout) clearTimeout(timeout);
+      });
+      progressBarTimeoutRefs.current = {};
       
       // Reset toggling flags
       isTogglingRef.current = {};
@@ -1107,15 +1123,27 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     saveToFirebase();
   };
 
+  // Memoized profile picture cache to reduce repeated logging
+  const profilePictureCache = useRef<Map<string, string>>(new Map());
+  
   // Get the best available profile picture for a user
   const getUserProfilePicture = useCallback((userId: string): string => {
+    // Check cache first to avoid repeated processing
+    const cacheKey = `${userId}-${userProfiles[userId]?.avatar || 'none'}-${userAvatar}`;
+    if (profilePictureCache.current.has(cacheKey)) {
+      return profilePictureCache.current.get(cacheKey)!;
+    }
+    
     const userProfile = userProfiles[userId];
     
+    // Only log when actually computing (not from cache)
     console.log(`🖼️ Getting profile picture for ${userId}:`, {
       profile: userProfile,
       avatar: userProfile?.avatar,
       hasRealAvatar: userProfile?.avatar && !userProfile.avatar.includes('placeholder')
     });
+    
+    let finalAvatar: string;
     
     // First priority: Real user avatar from profile
     if (userProfile?.avatar && 
@@ -1124,23 +1152,32 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
         !userProfile.avatar.includes('placeholder') &&
         !userProfile.avatar.includes('ui-avatars')) {
       console.log(`✅ Using real avatar for ${userId}: ${userProfile.avatar}`);
-      return userProfile.avatar;
+      finalAvatar = userProfile.avatar;
     }
-    
     // Second priority: For current user, use their stored avatar
-    if (userId === user?.uid && userAvatar && 
+    else if (userId === user?.uid && userAvatar && 
         userAvatar !== 'https://randomuser.me/api/portraits/men/32.jpg' &&
         !userAvatar.includes('placeholder') &&
         !userAvatar.includes('ui-avatars')) {
       console.log(`✅ Using current user avatar for ${userId}: ${userAvatar}`);
-      return userAvatar;
+      finalAvatar = userAvatar;
+    }
+    // Third priority: High-quality generated avatar with user's actual name
+    else {
+      const displayName = userProfile?.fullName || userProfile?.username || `User${userId.slice(-4)}`;
+      finalAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&size=150&background=4ECDC4&color=ffffff&format=png&font-size=0.6&rounded=true&bold=true`;
+      console.log(`📝 Using generated avatar for ${userId}: ${finalAvatar}`);
     }
     
-    // Third priority: High-quality generated avatar with user's actual name
-    const displayName = userProfile?.fullName || userProfile?.username || `User${userId.slice(-4)}`;
-    const generatedAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&size=150&background=4ECDC4&color=ffffff&format=png&font-size=0.6&rounded=true&bold=true`;
-    console.log(`📝 Using generated avatar for ${userId}: ${generatedAvatar}`);
-    return generatedAvatar;
+    // Cache the result
+    profilePictureCache.current.set(cacheKey, finalAvatar);
+    
+    // Clear cache if it gets too large (memory management)
+    if (profilePictureCache.current.size > 100) {
+      profilePictureCache.current.clear();
+    }
+    
+    return finalAvatar;
   }, [userProfiles, user, userAvatar]);
 
   // Get the current follow state (instant ref cache takes priority) - ZERO DELAY
@@ -1426,6 +1463,8 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
           console.log(`✅ [${videoId}] Playing successfully`);
           // Hide thumbnail instantly when playing
           setShowThumbnails(prev => ({ ...prev, [videoId]: false }));
+          // Hide progress bar when playing
+          hideProgressBarForVideo(videoId);
         } catch (playError) {
           console.error(`❌ [${videoId}] Play failed:`, playError);
           
@@ -1436,6 +1475,8 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
             await video.playAsync();
             console.log(`✅ [${videoId}] Playing after reset`);
             setShowThumbnails(prev => ({ ...prev, [videoId]: false }));
+            // Hide progress bar when playing
+            hideProgressBarForVideo(videoId);
           } catch (retryError) {
             console.error(`❌ [${videoId}] Retry play failed:`, retryError);
             // Revert state on play failure
@@ -1449,6 +1490,9 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
           await video.pauseAsync();
           console.log(`✅ [${videoId}] Paused successfully`);
           // DON'T show thumbnail when paused - keep video frame visible
+          
+          // Show progress bar when video is paused (YouTube Shorts style)
+          showProgressBarForVideo(videoId);
         } catch (pauseError) {
           console.error(`❌ [${videoId}] Pause failed:`, pauseError);
           
@@ -1459,6 +1503,8 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
             if (status.isLoaded && status.isPlaying) {
               await video.setStatusAsync({ shouldPlay: false });
               console.log(`✅ [${videoId}] Force paused`);
+              // Show progress bar after successful force pause too
+              showProgressBarForVideo(videoId);
             }
           } catch (retryError) {
             console.error(`❌ [${videoId}] Retry pause failed:`, retryError);
@@ -1766,6 +1812,56 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     });
   };
 
+  // YouTube Shorts-style progress bar functions
+  const showProgressBarForVideo = useCallback((videoId: string) => {
+    setProgressBarVisible(prev => ({ ...prev, [videoId]: true }));
+    
+    // Clear existing timeout
+    if (progressBarTimeoutRefs.current[videoId]) {
+      clearTimeout(progressBarTimeoutRefs.current[videoId]);
+    }
+    
+    // Hide progress bar after 3 seconds of inactivity
+    progressBarTimeoutRefs.current[videoId] = setTimeout(() => {
+      setProgressBarVisible(prev => ({ ...prev, [videoId]: false }));
+    }, 3000);
+  }, []);
+
+  const hideProgressBarForVideo = useCallback((videoId: string) => {
+    if (progressBarTimeoutRefs.current[videoId]) {
+      clearTimeout(progressBarTimeoutRefs.current[videoId]);
+    }
+    setProgressBarVisible(prev => ({ ...prev, [videoId]: false }));
+  }, []);
+
+  const handleProgressBarPress = useCallback(async (videoId: string, progress: number) => {
+    const videoRef = videoRefs.current[videoId];
+    if (!videoRef) return;
+
+    try {
+      const status = await videoRef.getStatusAsync();
+      if (status.isLoaded && status.durationMillis) {
+        const targetPosition = progress * status.durationMillis;
+        await videoRef.setPositionAsync(targetPosition);
+        console.log(`📍 Seeked to ${(progress * 100).toFixed(1)}% (${formatTime(targetPosition)})`);
+      }
+    } catch (error) {
+      console.error('Error seeking video:', error);
+    }
+  }, []);
+
+  const getVideoProgress = useCallback((videoId: string): number => {
+    if (isDraggingProgress[videoId]) {
+      return dragProgress[videoId] || 0;
+    }
+    
+    const duration = videoDurations[videoId];
+    const position = videoPositions[videoId];
+    
+    if (!duration || !position || duration === 0) return 0;
+    return Math.min(position / duration, 1);
+  }, [isDraggingProgress, dragProgress, videoDurations, videoPositions]);
+
   const renderTextWithLinks = (text: string, style: any) => {
     // URL regex pattern
     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -2056,6 +2152,10 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     const responsiveSize = getResponsiveSize();
     const metadata = videoMetadata[item.assetId];
     
+    // Calculate video container height accounting for tab bar
+    const tabBarHeight = 80; // Typical tab bar height
+    const videoContainerHeight = screenHeight - tabBarHeight;
+    
     // Calculate intelligent resize mode based on video's actual aspect ratio
     let dynamicResizeMode = ResizeMode.CONTAIN; // Default to CONTAIN to respect original format
     
@@ -2097,7 +2197,7 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     }
     
     return (
-      <View style={styles.videoContainer}>
+      <View style={[styles.videoContainer, { height: videoContainerHeight }]}>
         {/* Enhanced video area with comprehensive aspect ratio support */}
         <View style={styles.videoWrapper}>
           {/* Background for letterboxing/pillarboxing with fill options */}
@@ -2333,12 +2433,24 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
                 // Update playing state
                 setVideoPlayingStates(prev => ({ ...prev, [item.assetId]: false }));
                 
-                // Try to reload the video once for transient errors
+                // Try to reload the video with retry limit for transient errors
                 if (!isCodecError) {
+                  const currentRetries = videoRetryCount[item.assetId] || 0;
+                  const maxRetries = 3;
+                  
+                  if (currentRetries >= maxRetries) {
+                    console.log(`❌ Video ${item.assetId} reached max retries (${maxRetries}), marking as permanently failed`);
+                    setVideoRetryCount(prev => ({ ...prev, [item.assetId]: maxRetries + 1 }));
+                    return;
+                  }
+                  
+                  // Increment retry count
+                  setVideoRetryCount(prev => ({ ...prev, [item.assetId]: currentRetries + 1 }));
+                  
                   setTimeout(() => {
                     const videoRef = videoRefs.current[item.assetId];
                     if (videoRef) {
-                      console.log(`🔄 Attempting to reload video ${item.assetId} after error`);
+                      console.log(`🔄 Attempting to reload video ${item.assetId} after error (retry ${currentRetries + 1}/${maxRetries})`);
                       videoRef.loadAsync({ uri: videoUrl }, {}, false);
                     }
                   }, 2000);
@@ -2619,6 +2731,62 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
                     {renderTextWithLinks(item.caption, styles.caption)}
                   </View>
                 )}
+                
+                {/* Caption Progress Bar - YouTube Shorts Style */}
+                {isCurrentVideo && (
+                  <View style={styles.captionProgressContainer}>
+                    <TouchableWithoutFeedback
+                      onPress={(event) => {
+                        const { nativeEvent } = event;
+                        const trackX = nativeEvent.locationX;
+                        const trackWidth = screenWidth - 40; // Account for padding
+                        const progress = Math.max(0, Math.min(1, trackX / trackWidth));
+                        
+                        console.log(`📍 Caption progress bar tapped at ${(progress * 100).toFixed(1)}%`);
+                        handleProgressBarPress(item.assetId, progress);
+                        
+                        // Show haptic feedback
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        }
+                      }}
+                      onPressIn={() => {
+                        // Make progress bar thicker when touched
+                        setIsDraggingProgress(prev => ({ ...prev, [item.assetId]: true }));
+                      }}
+                      onPressOut={() => {
+                        // Return to normal thickness when released
+                        setTimeout(() => {
+                          setIsDraggingProgress(prev => ({ ...prev, [item.assetId]: false }));
+                        }, 200);
+                      }}
+                    >
+                      <View style={styles.captionProgressTrack}>
+                        <View 
+                          style={[
+                            styles.captionProgressFill,
+                            { 
+                              width: `${getVideoProgress(item.assetId) * 100}%`,
+                              height: isDraggingProgress[item.assetId] ? 4 : 2, // Thicker when touched
+                            }
+                          ]} 
+                        />
+                        <View 
+                          style={[
+                            styles.captionProgressHandle,
+                            { 
+                              left: `${getVideoProgress(item.assetId) * 100}%`,
+                              opacity: isDraggingProgress[item.assetId] ? 1 : 0.7, // More visible when touched
+                              transform: [{ 
+                                scale: isDraggingProgress[item.assetId] ? 1.5 : 1 // Bigger when touched
+                              }]
+                            }
+                          ]} 
+                        />
+                      </View>
+                    </TouchableWithoutFeedback>
+                  </View>
+                )}
               </View>
             )}
           </View>
@@ -2815,6 +2983,9 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
             
             console.log(`✅ Processing play/pause for video ${item.assetId}`);
             
+            // Show progress bar when tapping
+            showProgressBarForVideo(item.assetId);
+            
             // Add immediate visual feedback before async operation
             try {
               // For debugging: occasionally run health check on problematic videos
@@ -2837,6 +3008,36 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
         >
           <View style={styles.fullScreenTouchArea} />
         </TouchableWithoutFeedback>
+
+        {/* YouTube Shorts-style Red Progress Bar */}
+        {isCurrentVideo && progressBarVisible[item.assetId] && (
+          <View style={styles.progressBarContainer}>
+            <View style={styles.progressBarTrack}>
+              <View 
+                style={[
+                  styles.progressBarFill,
+                  { width: `${getVideoProgress(item.assetId) * 100}%` }
+                ]} 
+              />
+            </View>
+            <TouchableWithoutFeedback
+              onPress={(event) => {
+                const { nativeEvent } = event;
+                const trackX = nativeEvent.locationX;
+                const trackWidth = screenWidth - 40; // Account for padding
+                const progress = Math.max(0, Math.min(1, trackX / trackWidth));
+                
+                console.log(`📍 Progress bar tapped at ${(progress * 100).toFixed(1)}%`);
+                handleProgressBarPress(item.assetId, progress);
+                
+                // Keep progress bar visible for a bit longer after interaction
+                showProgressBarForVideo(item.assetId);
+              }}
+            >
+              <View style={styles.progressBarTouchArea} />
+            </TouchableWithoutFeedback>
+          </View>
+        )}
       </View>
     );
   }, [
@@ -2849,8 +3050,20 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     isMuted,
     getVideoRefCallback,
     handlePlaybackStatusUpdate,
-    getResponsiveSize
+    getResponsiveSize,
+    progressBarVisible,
+    videoDurations,
+    videoPositions,
+    isDraggingProgress,
+    dragProgress,
+    getVideoProgress,
+    showProgressBarForVideo,
+    handleProgressBarPress
   ]);
+
+  // Calculate video container height accounting for tab bar
+  const tabBarHeight = 80; // Typical tab bar height
+  const adjustedScreenHeight = screenHeight - tabBarHeight;
 
   return (
     <View style={styles.container}>
@@ -2894,11 +3107,11 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
       <FlatList
         ref={flatListRef}
         data={videos}
-        keyExtractor={(item) => item.assetId}
+        keyExtractor={(item, index) => item.assetId || `video-${index}`}
         renderItem={renderVideoItem}
         pagingEnabled
         showsVerticalScrollIndicator={false}
-        snapToInterval={screenHeight}
+        snapToInterval={adjustedScreenHeight}
         snapToAlignment="start"
         decelerationRate={Platform.OS === 'ios' ? 0.98 : 'fast'} // Much faster deceleration for Instagram-like feel
         disableIntervalMomentum={false} // Enable momentum for smoother swipes
@@ -2912,8 +3125,8 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         getItemLayout={(data, index) => ({
-          length: screenHeight,
-          offset: screenHeight * index,
+          length: adjustedScreenHeight,
+          offset: adjustedScreenHeight * index,
           index,
         })}
         // Instagram-style scroll optimizations
@@ -3109,6 +3322,33 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     zIndex: 500, // Lower z-index than user interface elements
   },
+  // YouTube Shorts-style progress bar styles
+  progressBarContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    zIndex: 1000, // High z-index to appear above video
+  },
+  progressBarTrack: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#FF0000', // YouTube's signature red color
+    borderRadius: 2,
+  },
+  progressBarTouchArea: {
+    position: 'absolute',
+    top: -10,
+    left: 0,
+    right: 0,
+    bottom: -10,
+    backgroundColor: 'transparent',
+  },
   videoInfoOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -3118,19 +3358,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: 20,
-    paddingBottom: 40, // Extra padding to ensure content stays above bottom edge
+    paddingBottom: 90, // Increased padding to clear bottom navigation bar
     zIndex: 1000,
     pointerEvents: 'box-none', // Allow touches to pass through to children only
   },
   videoInfoOverlayLandscape: {
     // Adjust overlay position for landscape videos with letterboxing
-    paddingBottom: 50,
+    paddingBottom: 100, // Increased padding for landscape videos
     paddingHorizontal: 20,
     paddingTop: 30,
   },
   videoInfoOverlaySquare: {
     // Adjust overlay position for square videos
-    paddingBottom: 45,
+    paddingBottom: 95, // Increased padding for square videos
     paddingHorizontal: 18,
     paddingTop: 25,
   },
@@ -3241,6 +3481,36 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
+  },
+  // Caption Progress Bar Styles - YouTube Shorts Style under caption
+  captionProgressContainer: {
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  captionProgressTrack: {
+    height: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 1,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  captionProgressFill: {
+    backgroundColor: '#FF0000', // YouTube's signature red color
+    borderRadius: 1,
+  },
+  captionProgressHandle: {
+    position: 'absolute',
+    top: -4,
+    width: 8,
+    height: 8,
+    backgroundColor: '#FF0000',
+    borderRadius: 4,
+    marginLeft: -4, // Center the handle
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
   },
   viewCount: {
     color: '#ccc',
@@ -3570,7 +3840,81 @@ const AlgorithmicHomeScreen: React.FC = () => {
   // 🔄 Real-time Algorithm Tracking
   const engagementTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastEngagementUpdate = useRef<number>(0);
-  
+
+  // 📺 Fallback Basic Video Loading
+  const loadBasicVideoFeed = useCallback(async (): Promise<AlgorithmicVideoData[]> => {
+    try {
+      console.log('📺 Loading basic video feed from posts collection...');
+      
+      // FIXED: Use a simpler query that doesn't require complex indexes
+      const videosSnapshot = await getDocs(
+        query(
+          collection(db, 'posts'), 
+          where('processed', '==', true), // Only require processed=true
+          orderBy('createdAt', 'desc'), 
+          limit(20)
+        )
+      );
+      
+      console.log(`📺 Found ${videosSnapshot.docs.length} processed videos in posts collection`);
+      
+      const videos = videosSnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log(`📺 Processing video: ${doc.id}`, {
+          videoId: doc.id,
+          streamingUrl: data.streamingUrl || data.playbackUrl || data.videoUrl,
+          username: data.username,
+          userId: data.userId,
+          status: data.status
+        });
+        
+        return {
+          assetId: doc.id, // Use document ID as assetId (for compatibility)
+          videoId: doc.id, // Google Cloud uses videoId
+          playbackUrl: data.streamingUrl || data.playbackUrl || data.videoUrl || '', // Try Google Cloud field first
+          streamingUrl: data.streamingUrl || data.playbackUrl || data.videoUrl || '', // Google Cloud field
+          thumbnailUrl: data.thumbnailUrl || '',
+          username: data.username || 'Unknown User',
+          userId: data.userId || '',
+          views: data.views || 0,
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+          caption: data.caption || '',
+          algorithmScore: 0.5,
+          boostLevel: 0,
+          seedTestCompleted: false,
+          engagementRate: 0,
+          freshnessScore: 0.5,
+          personalizedScore: 0.5
+        };
+      }).filter(video => {
+        // FIXED: Filter out videos with missing required fields
+        const isValid = video.assetId && 
+                       (video.streamingUrl || video.playbackUrl) && 
+                       video.userId && 
+                       video.username !== 'Unknown User';
+        
+        if (!isValid) {
+          console.warn(`⚠️ Filtering out invalid video:`, {
+            assetId: video.assetId,
+            hasStreamingUrl: !!video.streamingUrl,
+            hasPlaybackUrl: !!video.playbackUrl,
+            hasUserId: !!video.userId,
+            username: video.username
+          });
+        }
+        
+        return isValid;
+      });
+      
+      console.log(`✅ Successfully processed ${videos.length} valid videos`);
+      return videos;
+      
+    } catch (error) {
+      console.error('❌ Error loading basic videos:', error);
+      return [];
+    }
+  }, []);
+
   // 🌱 Initialize Algorithmic Feed
   const loadAlgorithmicFeed = useCallback(async () => {
     if (!user) return;
@@ -3588,30 +3932,44 @@ const AlgorithmicHomeScreen: React.FC = () => {
         // Fallback to basic video loading if algorithmic feed is empty
         console.log('⚠️ No algorithmic feed available, loading basic videos');
         const basicVideos = await loadBasicVideoFeed();
+        
+        if (basicVideos.length === 0) {
+          console.log('⚠️ No basic videos available either');
+          setAlgorithmicVideos([]);
+          return;
+        }
+        
         setAlgorithmicVideos(basicVideos);
       } else {
         console.log(`✅ Loaded ${feedVideos.length} algorithmic videos`);
         const enhancedVideos: AlgorithmicVideoData[] = feedVideos.map((video: any) => ({
-          assetId: video.assetId,
-          playbackUrl: video.playbackUrl,
-          thumbnailUrl: video.thumbnailUrl,
-          username: video.username,
-          userId: video.userId,
+          assetId: video.assetId || video.id, // Ensure we have an assetId
+          videoId: video.videoId || video.assetId || video.id,
+          playbackUrl: video.streamingUrl || video.playbackUrl || video.videoUrl || '',
+          streamingUrl: video.streamingUrl || video.playbackUrl || video.videoUrl || '',
+          thumbnailUrl: video.thumbnailUrl || '',
+          username: video.username || 'Unknown User',
+          userId: video.userId || '',
           views: video.views || 0,
-          createdAt: video.createdAt,
-          caption: video.caption,
-          algorithmScore: 0.7, // Default algorithm score
+          createdAt: video.createdAt || new Date().toISOString(),
+          caption: video.caption || '',
+          algorithmScore: 0.7,
           boostLevel: 0,
           seedTestCompleted: false,
           engagementRate: 0,
           freshnessScore: 0.5,
           personalizedScore: 0.7
-        }));
+        })).filter(video => {
+          // FIXED: Filter out videos with missing required fields
+          return video.assetId && (video.streamingUrl || video.playbackUrl) && video.userId;
+        });
+        
         setAlgorithmicVideos(enhancedVideos);
       }
       
-      // Start watch tracking for first video
-      if (feedVideos.length > 0) {
+      // Start watch tracking for first video if available
+      const videosToUse = algorithmicVideos.length > 0 ? algorithmicVideos : feedVideos;
+      if (videosToUse.length > 0) {
         setWatchStartTime(Date.now());
       }
       
@@ -3620,44 +3978,17 @@ const AlgorithmicHomeScreen: React.FC = () => {
       setFeedError('Failed to load personalized feed');
       
       // Fallback to basic videos
-      const basicVideos = await loadBasicVideoFeed();
-      setAlgorithmicVideos(basicVideos);
+      try {
+        const basicVideos = await loadBasicVideoFeed();
+        setAlgorithmicVideos(basicVideos);
+      } catch (fallbackError) {
+        console.error('❌ Fallback loading also failed:', fallbackError);
+        setAlgorithmicVideos([]);
+      }
     } finally {
       setIsLoadingFeed(false);
     }
-  }, [user]);
-
-  // 📺 Fallback Basic Video Loading
-  const loadBasicVideoFeed = useCallback(async (): Promise<AlgorithmicVideoData[]> => {
-    try {
-      const videosSnapshot = await getDocs(
-        query(collection(db, 'videos'), orderBy('createdAt', 'desc'), limit(20))
-      );
-      
-      return videosSnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          assetId: data.assetId,
-          playbackUrl: data.playbackUrl,
-          thumbnailUrl: data.thumbnailUrl,
-          username: data.username,
-          userId: data.userId,
-          views: data.views || 0,
-          createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-          caption: data.caption,
-          algorithmScore: 0.5,
-          boostLevel: 0,
-          seedTestCompleted: false,
-          engagementRate: 0,
-          freshnessScore: 0.5,
-          personalizedScore: 0.5
-        };
-      });
-    } catch (error) {
-      console.error('❌ Error loading basic videos:', error);
-      return [];
-    }
-  }, []);
+  }, [user, loadBasicVideoFeed]);
 
   // 📈 Track Video Engagement in Real-time
   const trackVideoEngagement = useCallback(async (
@@ -3666,7 +3997,10 @@ const AlgorithmicHomeScreen: React.FC = () => {
     totalDuration: number,
     action: 'view' | 'like' | 'comment' | 'share' | 'skip' | 'complete'
   ) => {
-    if (!user) return;
+    if (!user || !videoId || videoId === 'undefined') {
+      console.warn('⚠️ Cannot track engagement: missing user or invalid videoId', { user: !!user, videoId });
+      return;
+    }
     
     try {
       const completionRate = totalDuration > 0 ? watchTime / totalDuration : 0;
@@ -3712,26 +4046,27 @@ const AlgorithmicHomeScreen: React.FC = () => {
 
   // 🎬 Handle Video Change with Algorithm Tracking
   const handleVideoChange = useCallback((newIndex: number) => {
-    if (currentVideoIndex === newIndex) return;
+    if (currentVideoIndex === newIndex || !algorithmicVideos[newIndex]) return;
     
     // Stop tracking previous video
-    if (algorithmicVideos[currentVideoIndex] && user) {
+    const prevVideo = algorithmicVideos[currentVideoIndex];
+    if (prevVideo && prevVideo.assetId && user) {
       engagementTrackingService.stopWatching();
       
       // Track engagement for previous video if watched for more than 1 second
       if (watchStartTime > 0) {
         const watchTime = (Date.now() - watchStartTime) / 1000;
-        const video = algorithmicVideos[currentVideoIndex];
         
         if (watchTime > 1) {
-          trackVideoEngagement(video.assetId, watchTime, 30, 'view'); // Assuming 30s average duration
+          trackVideoEngagement(prevVideo.assetId, watchTime, 30, 'view');
         }
       }
     }
     
     // Start tracking new video
-    if (algorithmicVideos[newIndex] && user) {
-      engagementTrackingService.startWatching(algorithmicVideos[newIndex].assetId, user.uid);
+    const newVideo = algorithmicVideos[newIndex];
+    if (newVideo && newVideo.assetId && user) {
+      engagementTrackingService.startWatching(newVideo.assetId, user.uid);
     }
     
     setCurrentVideoIndex(newIndex);
@@ -3753,7 +4088,9 @@ const AlgorithmicHomeScreen: React.FC = () => {
       const moreVideos = await algorithmicFeedService.getPersonalizedFeed(user.uid, 10);
       const enhancedMoreVideos: AlgorithmicVideoData[] = moreVideos.map((video: any) => ({
         assetId: video.assetId,
-        playbackUrl: video.playbackUrl,
+        videoId: video.videoId || video.assetId,
+        playbackUrl: video.streamingUrl || video.playbackUrl,
+        streamingUrl: video.streamingUrl || video.playbackUrl,
         thumbnailUrl: video.thumbnailUrl,
         username: video.username,
         userId: video.userId,
@@ -3800,8 +4137,10 @@ const AlgorithmicHomeScreen: React.FC = () => {
 
   // 🎬 Start tracking first video when feed loads
   useEffect(() => {
-    if (algorithmicVideos.length > 0 && user && currentVideoIndex === 0) {
-      engagementTrackingService.startWatching(algorithmicVideos[0].assetId, user.uid);
+    const firstVideo = algorithmicVideos[0];
+    if (firstVideo && firstVideo.assetId && user && currentVideoIndex === 0) {
+      console.log('📊 Starting tracking for first video:', firstVideo.assetId);
+      engagementTrackingService.startWatching(firstVideo.assetId, user.uid);
       setWatchStartTime(Date.now());
     }
   }, [algorithmicVideos, user, currentVideoIndex]);
@@ -3816,7 +4155,7 @@ const AlgorithmicHomeScreen: React.FC = () => {
         // Update engagement every 10 seconds of watch time
         if (currentWatchTime - lastEngagementUpdate.current >= 10) {
           const currentVideo = algorithmicVideos[currentVideoIndex];
-          if (currentVideo) {
+          if (currentVideo && currentVideo.assetId) {
             trackVideoEngagement(currentVideo.assetId, currentWatchTime, 30, 'view');
             lastEngagementUpdate.current = currentWatchTime;
           }
