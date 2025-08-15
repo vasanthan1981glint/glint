@@ -1,12 +1,9 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, Keyboard, View } from 'react-native';
-import MuxAnimatedPreview from './MuxAnimatedPreview';
-import MuxThumbnail from './MuxThumbnail';
+import { Alert, Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 
 interface CustomThumbnailPickerProps {
-  playbackId?: string;
   selectedThumbnail?: string;
   onThumbnailSelect: (uri: string) => void;
   caption?: string;
@@ -15,7 +12,6 @@ interface CustomThumbnailPickerProps {
 }
 
 export default function CustomThumbnailPicker({
-  playbackId,
   selectedThumbnail,
   onThumbnailSelect,
   caption = '',
@@ -50,10 +46,9 @@ export default function CustomThumbnailPicker({
     }
   };
 
-  const selectMuxThumbnail = (time: number) => {
-    if (!playbackId) return;
-    const muxThumbUrl = `mux://${playbackId}?time=${time}`;
-    onThumbnailSelect(muxThumbUrl);
+  const selectPlaceholderThumbnail = (time: number) => {
+    const placeholderUrl = `placeholder:${time}`;
+    onThumbnailSelect(placeholderUrl);
   };
 
   return (
@@ -70,28 +65,15 @@ export default function CustomThumbnailPicker({
               key={time}
               style={[
                 styles.thumbnailOption,
-                selectedThumbnail === (playbackId ? `mux://${playbackId}?time=${time}` : `placeholder:${time}`) && styles.selectedThumbnail
+                selectedThumbnail === `placeholder:${time}` && styles.selectedThumbnail
               ]}
               onPress={() => {
-                if (playbackId) {
-                  selectMuxThumbnail(time);
-                } else {
-                  // Use placeholder selection for non-Mux videos
-                  onThumbnailSelect(`placeholder:${time}`);
-                }
+                selectPlaceholderThumbnail(time);
               }}
             >
-              {playbackId ? (
-                <MuxThumbnail
-                  playbackId={playbackId}
-                  opts={{ time, width: 160, height: 90 }}
-                  style={styles.thumbnail}
-                />
-              ) : (
-                <View style={[styles.thumbnail, styles.placeholderThumbnail]}>
-                  <Text style={styles.placeholderText}>Frame {time}s</Text>
-                </View>
-              )}
+              <View style={[styles.thumbnail, styles.placeholderThumbnail]}>
+                <Text style={styles.placeholderText}>Frame {time}s</Text>
+              </View>
               <Text style={styles.timeLabel}>{time}s</Text>
             </TouchableOpacity>
           ))}
@@ -104,32 +86,16 @@ export default function CustomThumbnailPicker({
         <TouchableOpacity
           style={[
             styles.animatedOption,
-            selectedThumbnail === (playbackId ? `mux://${playbackId}?animated=true` : 'placeholder:animated') && styles.selectedThumbnail
+            selectedThumbnail === 'placeholder:animated' && styles.selectedThumbnail
           ]}
           onPress={() => {
-            if (playbackId) {
-              onThumbnailSelect(`mux://${playbackId}?animated=true`);
-            } else {
-              onThumbnailSelect('placeholder:animated');
-            }
+            onThumbnailSelect('placeholder:animated');
           }}
         >
-          {playbackId ? (
-            <MuxAnimatedPreview
-              playbackId={playbackId}
-              start={2}
-              end={7}
-              fps={10}
-              width={320}
-              height={180}
-              style={styles.animatedPreview}
-            />
-          ) : (
-            <View style={[styles.animatedPreview, styles.placeholderThumbnail]}>
-              <Text style={styles.placeholderText}>Animated Preview</Text>
-              <Text style={styles.placeholderText}>2-7s</Text>
-            </View>
-          )}
+          <View style={[styles.animatedPreview, styles.placeholderThumbnail]}>
+            <Text style={styles.placeholderText}>Animated Preview</Text>
+            <Text style={styles.placeholderText}>2-7s</Text>
+          </View>
           <Text style={styles.animatedLabel}>2-7s Preview</Text>
         </TouchableOpacity>
       </View>

@@ -80,7 +80,7 @@ function MyProfileScreen() {
   const [showAnalytics, setShowAnalytics] = useState(false);
 
   useEffect(() => {
-    console.log('🎬 Simple video upload system enabled - No Mux integration');
+    console.log('☁️ Google Cloud Storage video upload system enabled');
   }, []);
 
   // Fetch profile data and update states
@@ -222,9 +222,9 @@ function MyProfileScreen() {
       setUploading(true);
       setShowThumbnailSelector(false);
       
-      console.log('📤 Starting Mux upload process...');
+      console.log('📤 Starting Google Cloud Storage upload process...');
       
-      // Upload to Mux via Railway backend
+      // Upload to Google Cloud Storage via Railway backend
       await uploadVideoToMux(pendingVideoUri, {
         caption: videoCaption,
         thumbnailUri: selectedThumbnail
@@ -338,10 +338,10 @@ function MyProfileScreen() {
     }
   };
 
-  // Mux upload function using Railway backend
+  // Google Cloud Storage upload function using Railway backend
   const uploadVideoToMux = async (videoUri: string, editParams?: any) => {
-    const uploadId = `mux_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    console.log('🎯 Mux upload started with ID:', uploadId);
+    const uploadId = `gcs_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log('☁️ Google Cloud Storage upload started with ID:', uploadId);
     
     try {
       setShowUploadModal(true);
@@ -349,7 +349,7 @@ function MyProfileScreen() {
       setCurrentUploadProgress({
         progress: 10,
         stage: 'uploading',
-        message: 'Preparing your video for Mux...'
+        message: 'Preparing your video for upload...'
       });
 
       const currentUser = auth.currentUser;
@@ -357,47 +357,95 @@ function MyProfileScreen() {
         throw new Error('❌ Authentication required');
       }
 
-      // Create form data for video upload
-      const formData = new FormData();
-      formData.append('video', {
-        uri: videoUri,
-        type: 'video/mp4',
-        name: `video_${Date.now()}.mp4`,
-      } as any);
-
       setCurrentUploadProgress({
-        progress: 30,
+        progress: 20,
         stage: 'uploading',
-        message: 'Uploading to Mux...'
+        message: 'Getting signed upload URL...'
       });
 
-      // Upload to Railway backend with Mux integration
-      const response = await fetch('https://glint-production-b62b.up.railway.app/api/upload', {
+      // Get signed upload URL from Railway backend
+      const signedUrlResponse = await fetch('https://glint-production-f754.up.railway.app/upload/signed-url', {
         method: 'POST',
-        body: formData,
         headers: {
-          'Content-Type': 'multipart/form-data',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileName: `video_${Date.now()}.mp4`,
+          contentType: 'video/mp4'
+        }),
+      });
+
+      if (!signedUrlResponse.ok) {
+        throw new Error(`Failed to get upload URL: ${signedUrlResponse.statusText}`);
+      }
+
+      const { uploadUrl, videoUrl, fileName } = await signedUrlResponse.json();
+      console.log('✅ Got signed upload URL:', { uploadUrl, videoUrl, fileName });
+
+      setCurrentUploadProgress({
+        progress: 40,
+        stage: 'uploading',
+        message: 'Uploading to Google Cloud Storage...'
+      });
+
+      // Upload video to Google Cloud Storage using signed URL
+      const videoBlob = await fetch(videoUri).then(r => r.blob());
+      
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        body: videoBlob,
+        headers: {
+          'Content-Type': 'video/mp4',
         },
       });
 
-      if (!response.ok) {
-        throw new Error(`Upload failed: ${response.statusText}`);
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload to Google Cloud failed: ${uploadResponse.statusText}`);
       }
 
-      const result = await response.json();
-      console.log('✅ Mux upload response:', result);
+      console.log('✅ Video uploaded to Google Cloud Storage successfully');
 
       setCurrentUploadProgress({
         progress: 70,
         stage: 'processing',
-        message: 'Processing with Mux...'
+        message: 'Processing video metadata...'
       });
 
-      // Extract Mux data from response
-      const { assetId, playbackId } = result;
-      
-      if (!assetId || !playbackId) {
-        throw new Error('Invalid Mux response: missing assetId or playbackId');
+      // Upload thumbnail if custom one is provided
+      let thumbnailUrl = '';
+      if (editParams?.thumbnailUri && !editParams.thumbnailUri.startsWith('placeholder:')) {
+        try {
+          const thumbnailSignedUrlResponse = await fetch('https://glint-production-f754.up.railway.app/upload/signed-url', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              fileName: `thumbnail_${Date.now()}.jpg`,
+              contentType: 'image/jpeg'
+            }),
+          });
+
+          if (thumbnailSignedUrlResponse.ok) {
+            const { uploadUrl: thumbUploadUrl, videoUrl: thumbVideoUrl } = await thumbnailSignedUrlResponse.json();
+            
+            const thumbnailBlob = await fetch(editParams.thumbnailUri).then(r => r.blob());
+            const thumbUploadResponse = await fetch(thumbUploadUrl, {
+              method: 'PUT',
+              body: thumbnailBlob,
+              headers: {
+                'Content-Type': 'image/jpeg',
+              },
+            });
+
+            if (thumbUploadResponse.ok) {
+              thumbnailUrl = thumbVideoUrl;
+              console.log('✅ Thumbnail uploaded:', thumbnailUrl);
+            }
+          }
+        } catch (error) {
+          console.warn('⚠️ Failed to upload thumbnail:', error);
+        }
       }
 
       setCurrentUploadProgress({
@@ -406,13 +454,14 @@ function MyProfileScreen() {
         message: 'Saving video metadata...'
       });
 
-      // Create video document with Mux data
+      // Create video document with Google Cloud Storage data
       const videoDoc = {
         userId: currentUser.uid,
-        assetId: assetId,
-        playbackId: playbackId,
-        playbackUrl: `https://stream.mux.com/${playbackId}.m3u8`,
-        thumbnailUrl: editParams?.thumbnailUri || `https://image.mux.com/${playbackId}/thumbnail.jpg`,
+        id: uploadId,
+        videoUrl: videoUrl,
+        playbackUrl: videoUrl,
+        thumbnailUrl: thumbnailUrl || `https://via.placeholder.com/300x200.png?text=Video+Thumbnail`,
+        fileName: fileName,
         createdAt: new Date().toISOString(),
         username: username || currentUser.email?.split('@')[0] || 'user',
         caption: editParams?.caption || 'New video',
@@ -420,35 +469,36 @@ function MyProfileScreen() {
         likes: 0,
         processed: true,
         status: 'ready',
-        storage: 'mux',
+        storage: 'google-cloud',
         isRealVideo: true,
         uploadedAt: new Date().toISOString(),
+        bucketName: 'glint-videos',
       };
 
       // Save to Firebase
-      await setDoc(doc(db, 'videos', assetId), videoDoc);
-      console.log('✅ Mux video saved to Firebase:', assetId);
+      await setDoc(doc(db, 'videos', uploadId), videoDoc);
+      console.log('✅ Video saved to Firebase:', uploadId);
 
       // Also create post document
       const postDoc = {
-        videoId: assetId,
+        videoId: uploadId,
         userId: currentUser.uid,
         username: videoDoc.username,
         caption: videoDoc.caption,
         thumbnailUrl: videoDoc.thumbnailUrl,
         playbackUrl: videoDoc.playbackUrl,
-        playbackId: playbackId,
+        videoUrl: videoDoc.videoUrl,
         createdAt: new Date().toISOString(),
         likes: 0,
         comments: 0,
         views: 0,
         processed: true,
         status: 'ready',
-        storage: 'mux',
+        storage: 'google-cloud',
       };
 
-      await setDoc(doc(db, 'posts', assetId), postDoc);
-      console.log('✅ Mux post saved:', assetId);
+      await setDoc(doc(db, 'posts', uploadId), postDoc);
+      console.log('✅ Post saved:', uploadId);
 
       setCurrentUploadProgress({
         progress: 100,
@@ -475,14 +525,14 @@ function MyProfileScreen() {
       
       setTimeout(() => {
         setShowUploadModal(false);
-        Alert.alert('🎉 Upload Complete!', 'Your video has been uploaded to Mux successfully!');
+        Alert.alert('🎉 Upload Complete!', 'Your video has been uploaded to Google Cloud Storage successfully!');
       }, 1000);
       
-      console.log('🎉 Mux upload completed successfully');
+      console.log('☁️ Google Cloud Storage upload completed successfully');
       
     } catch (error: any) {
-      console.error('❌ Mux upload failed:', error);
-      Alert.alert('Upload Failed', `Failed to upload video to Mux: ${error?.message || 'Unknown error'}`);
+      console.error('❌ Google Cloud Storage upload failed:', error);
+      Alert.alert('Upload Failed', `Failed to upload video to Google Cloud Storage: ${error?.message || 'Unknown error'}`);
       setShowUploadModal(false);
       throw error;
     }

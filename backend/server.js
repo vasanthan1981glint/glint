@@ -63,11 +63,11 @@ app.post('/upload/signed-url', async (req, res) => {
       contentType: contentType || 'video/mp4'
     });
     
-    // Generate signed URL for reading (long-term)
+    // Generate signed URL for reading (7 days max allowed)
     const [videoUrl] = await file.getSignedUrl({
       version: 'v4',
       action: 'read',
-      expires: Date.now() + 365 * 24 * 60 * 60 * 1000 // 1 year
+      expires: Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days (max allowed)
     });
     
     res.json({
