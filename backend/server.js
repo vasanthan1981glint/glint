@@ -27,6 +27,36 @@ try {
 app.use(cors());
 app.use(express.json());
 
+// Configure bucket for public access
+const configureBucket = async () => {
+  try {
+    if (!storage) {
+      console.log('⚠️ Storage not initialized, skipping bucket configuration');
+      return;
+    }
+    
+    const bucketName = process.env.GOOGLE_CLOUD_BUCKET || 'glint-videos';
+    const bucket = storage.bucket(bucketName);
+    
+    // Make bucket publicly readable
+    await bucket.iam.setPolicy({
+      bindings: [
+        {
+          role: 'roles/storage.objectViewer',
+          members: ['allUsers'],
+        },
+      ],
+    });
+    
+    console.log(`✅ Bucket ${bucketName} configured for public access`);
+  } catch (error) {
+    console.log(`⚠️ Bucket policy setup: ${error.message}`);
+  }
+};
+
+// Call this when server starts
+configureBucket();
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
@@ -53,7 +83,8 @@ app.post('/upload/signed-url', async (req, res) => {
     const bucketName = process.env.GOOGLE_CLOUD_BUCKET || 'glint-videos';
     
     const bucket = storage.bucket(bucketName);
-    const file = bucket.file(`videos/${Date.now()}-${fileName || 'video.mp4'}`);
+    const uniqueFileName = `videos/${Date.now()}-${fileName || 'video.mp4'}`;
+    const file = bucket.file(uniqueFileName);
     
     // Generate signed URL for upload (15 minutes)
     const uploadExpiry = new Date();
@@ -66,26 +97,21 @@ app.post('/upload/signed-url', async (req, res) => {
       contentType: contentType || 'video/mp4'
     });
     
-    // Generate signed URL for reading (6 days to be safe)
-    const readExpiry = new Date();
-    readExpiry.setDate(readExpiry.getDate() + 6);
-    
-    const [videoUrl] = await file.getSignedUrl({
-      version: 'v4',
-      action: 'read',
-      expires: readExpiry
-    });
-    
+    // Return PUBLIC URL that NEVER expires
+    const publicUrl = `https://storage.googleapis.com/${bucketName}/${uniqueFileName}`;
+
     res.json({
       success: true,
       uploadUrl: uploadUrl,
-      videoUrl: videoUrl,
-      fileName: file.name,
+      videoUrl: publicUrl,  // PUBLIC URL - works forever!
+      playbackUrl: publicUrl, // Same as videoUrl
+      fileName: uniqueFileName,
       bucketName: bucketName,
       message: 'Google Cloud Storage upload URL generated'
     });
 
-    console.log(`📤 Generated upload URL for: ${file.name}`);
+    console.log(`📤 Generated upload URL for: ${uniqueFileName}`);
+    console.log(`🌍 Public URL: ${publicUrl}`);
     
   } catch (error) {
     console.error('❌ Upload URL generation error:', error);
@@ -93,6 +119,39 @@ app.post('/upload/signed-url', async (req, res) => {
       error: 'Failed to generate upload URL', 
       details: error.message,
       service: 'Google Cloud Storage'
+    });
+  }
+});
+
+// Make uploaded file public
+app.post('/make-public', async (req, res) => {
+  try {
+    if (!storage) {
+      return res.status(500).json({ error: 'Google Cloud Storage not initialized' });
+    }
+
+    const { fileName } = req.body;
+    const bucketName = process.env.GOOGLE_CLOUD_BUCKET || 'glint-videos';
+    const bucket = storage.bucket(bucketName);
+    const file = bucket.file(fileName);
+    
+    // Make the file public
+    await file.makePublic();
+    
+    const publicUrl = `https://storage.googleapis.com/${bucketName}/${fileName}`;
+    
+    res.json({ 
+      success: true,
+      publicUrl: publicUrl,
+      message: 'File made public successfully'
+    });
+    
+    console.log(`🌍 File made public: ${publicUrl}`);
+  } catch (error) {
+    console.error('❌ Error making file public:', error);
+    res.status(500).json({ 
+      error: 'Failed to make file public', 
+      details: error.message 
     });
   }
 });
