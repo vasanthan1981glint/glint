@@ -1,7 +1,7 @@
 // PERMANENT FIX - Auto Playback ID Retrieval System (TypeScript)
 // This system automatically converts Asset IDs to Playback IDs in real-time
 
-const RAILWAY_API_URL = 'https://glint-production-b62b.up.railway.app';
+const RAILWAY_API_URL = 'https://glint-production-f754.up.railway.app';
 
 // Cache for Asset ID → Playback ID mappings to avoid repeated API calls
 const playbackIdCache = new Map<string, string>();

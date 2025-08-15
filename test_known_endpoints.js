@@ -1,7 +1,7 @@
 // Test the actual Railway endpoints we know exist
 
 const testKnownEndpoints = async () => {
-  const API_URL = 'https://glint-production-b62b.up.railway.app';
+  const API_URL = 'https://glint-production-f754.up.railway.app';
   
   console.log('🔍 Testing known Railway endpoints...');
   

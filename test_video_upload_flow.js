@@ -2,7 +2,7 @@
 // This will help us understand the correct ID format
 
 const checkVideoUploadFlow = async () => {
-  const API_URL = 'https://glint-production-b62b.up.railway.app';
+  const API_URL = 'https://glint-production-f754.up.railway.app';
   
   console.log('🔍 Testing video upload flow to get real Playback IDs...');
   

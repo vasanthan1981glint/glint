@@ -1,7 +1,7 @@
 // Manually trigger the Mux webhook to fix the video
 const axios = require('axios');
 
-const RAILWAY_API_URL = 'https://glint-production-b62b.up.railway.app';
+const RAILWAY_API_URL = 'https://glint-production-f754.up.railway.app';
 
 async function triggerWebhookFix() {
   console.log('🔗 MANUALLY TRIGGERING MUX WEBHOOK');
