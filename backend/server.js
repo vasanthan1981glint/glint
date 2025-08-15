@@ -55,19 +55,25 @@ app.post('/upload/signed-url', async (req, res) => {
     const bucket = storage.bucket(bucketName);
     const file = bucket.file(`videos/${Date.now()}-${fileName || 'video.mp4'}`);
     
-    // Generate signed URL for upload
+    // Generate signed URL for upload (15 minutes)
+    const uploadExpiry = new Date();
+    uploadExpiry.setMinutes(uploadExpiry.getMinutes() + 15);
+    
     const [uploadUrl] = await file.getSignedUrl({
       version: 'v4',
       action: 'write',
-      expires: Date.now() + 15 * 60 * 1000, // 15 minutes
+      expires: uploadExpiry,
       contentType: contentType || 'video/mp4'
     });
     
-    // Generate signed URL for reading (7 days max allowed)
+    // Generate signed URL for reading (6 days to be safe)
+    const readExpiry = new Date();
+    readExpiry.setDate(readExpiry.getDate() + 6);
+    
     const [videoUrl] = await file.getSignedUrl({
       version: 'v4',
       action: 'read',
-      expires: Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days (max allowed)
+      expires: readExpiry
     });
     
     res.json({
