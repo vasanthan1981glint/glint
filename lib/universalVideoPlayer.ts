@@ -33,10 +33,10 @@ export class UniversalVideoPlayer {
       return originalUrl;
     }
 
-    // Try Mux variants if original is a Mux URL
-    if (originalUrl.includes('stream.mux.com')) {
-      const muxVariants = this.generateMuxVariants(originalUrl);
-      for (const variant of muxVariants) {
+    // For Google Cloud Storage URLs, try different quality variants
+    if (originalUrl.includes('googleapis.com') || originalUrl.includes('googleusercontent.com')) {
+      const variants = this.generateGoogleCloudVariants(originalUrl);
+      for (const variant of variants) {
         const isWorking = await this.testVideoUrl(variant);
         if (isWorking) {
           this.workingUrls.set(assetId, variant);
@@ -92,20 +92,25 @@ export class UniversalVideoPlayer {
   }
 
   /**
-   * Generate Mux URL variants for better compatibility
+   * Generate Google Cloud Storage URL variants for better compatibility
    */
-  private static generateMuxVariants(originalUrl: string): string[] {
-    const playbackIdMatch = originalUrl.match(/stream\.mux\.com\/([A-Za-z0-9]+)/);
-    if (!playbackIdMatch) return [];
-
-    const playbackId = playbackIdMatch[1];
+  private static generateGoogleCloudVariants(originalUrl: string): string[] {
+    // Extract the base URL and try different formats
+    const baseUrl = originalUrl.replace(/\.(mp4|webm|mkv).*$/, '');
+    const urlObj = new URL(originalUrl);
+    
     return [
-      `https://stream.mux.com/${playbackId}.m3u8?redundant_streams=true`,
-      `https://stream.mux.com/${playbackId}.m3u8?token=public`,
-      `https://stream.mux.com/${playbackId}.m3u8?quality=auto`,
-      `https://stream.mux.com/${playbackId}/high.mp4`,
-      `https://stream.mux.com/${playbackId}/medium.mp4`,
-      `https://stream.mux.com/${playbackId}/low.mp4`
+      // Try different video formats
+      `${baseUrl}.mp4`,
+      `${baseUrl}.webm`,
+      // Try with different quality parameters
+      `${originalUrl}?quality=720p`,
+      `${originalUrl}?quality=480p`,
+      `${originalUrl}?quality=360p`,
+      // Try direct access
+      originalUrl.replace(/\/v\d+\//, '/'),
+      // Try without query parameters
+      urlObj.origin + urlObj.pathname
     ];
   }
 
