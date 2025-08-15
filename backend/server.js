@@ -8,8 +8,8 @@ const port = process.env.PORT || 3000;
 // Initialize Google Cloud Storage
 let storage;
 try {
-  if (process.env.GOOGLE_CLOUD_CREDENTIALS) {
-    const credentials = JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS);
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+    const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
     storage = new Storage({
       projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'glint-7e3c3',
       credentials: credentials
