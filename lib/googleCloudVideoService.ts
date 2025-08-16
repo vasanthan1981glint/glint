@@ -1,6 +1,9 @@
 // Google Cloud Video Service for React Native - Replaces Mux completely!
 // This eliminates all your upload failures and provides instant streaming
 
+import { auth } from '../firebaseConfig';
+import FirebaseThumbnailService from './firebaseThumbnailService';
+
 export interface GoogleCloudUploadOptions {
   videoUri: string;
   title?: string;
@@ -32,7 +35,7 @@ export interface StreamingVideoData {
 }
 
 class GoogleCloudVideoService {
-  private apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://glint-production-b62b.up.railway.app';
+  private apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://glint-production-f754.up.railway.app';
   private activeUploads = new Map<string, boolean>();
 
   /**
@@ -51,7 +54,7 @@ class GoogleCloudVideoService {
 
       const data = await response.json();
       console.log('✅ Google Cloud backend healthy:', data.service);
-      return data.status === 'OK' && data.cloud_storage && data.video_intelligence;
+      return data.status === 'healthy' && data.storage === 'connected';
       
     } catch (error: any) {
       console.warn('⚠️ Backend health check error:', error.message);
@@ -76,12 +79,15 @@ class GoogleCloudVideoService {
       });
 
       // Step 1: Create signed upload URL (replaces Mux create upload)
-      const createResponse = await fetch(`${this.apiUrl}/api/videos/create-upload`, {
+      const createResponse = await fetch(`${this.apiUrl}/upload/signed-url`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          fileName: `video_${Date.now()}.mp4`,
+          contentType: 'video/mp4', // Always use video/mp4 to ensure consistency
+          userId: options.metadata?.userId || 'anonymous',
           metadata: {
             title: options.title || 'Glint Video',
             description: options.description || '',
@@ -98,7 +104,7 @@ class GoogleCloudVideoService {
       }
 
       const uploadData = await createResponse.json();
-      console.log('✅ Google Cloud upload URL created:', uploadData.videoId);
+      console.log('✅ Google Cloud upload URL created:', uploadData.fileName);
 
       if (!uploadData.success || !uploadData.uploadUrl) {
         throw new Error('Invalid upload response from Google Cloud');
@@ -124,17 +130,52 @@ class GoogleCloudVideoService {
       );
 
       options.onProgress?.({
+        progress: 90,
+        stage: 'uploading',
+        message: 'Generating thumbnail...'
+      });
+
+      // Step 3: Generate and upload thumbnail to Firebase Storage
+      let thumbnailUrl = uploadData.videoUrl; // Fallback to video URL
+      
+      try {
+        const currentUser = auth.currentUser;
+        if (currentUser && options.metadata?.userId) {
+          const videoId = uploadData.fileName.replace(/^videos\/.*?\//, '').replace(/\.[^.]+$/, '');
+          
+          console.log('🎬 Generating thumbnail for video:', videoId);
+          const thumbnailResult = await FirebaseThumbnailService.processVideoThumbnail(
+            options.videoUri,
+            videoId,
+            options.metadata.userId,
+            {
+              time: 1000, // Extract thumbnail at 1 second
+              quality: 0.8,
+              width: 320,
+              height: 240
+            }
+          );
+          
+          thumbnailUrl = thumbnailResult.thumbnailUrl;
+          console.log('✅ Thumbnail uploaded to Firebase:', thumbnailUrl);
+        }
+      } catch (thumbnailError) {
+        console.warn('⚠️ Thumbnail generation failed, using video URL as fallback:', thumbnailError);
+        // Continue with video URL as thumbnail - don't fail the upload
+      }
+
+      options.onProgress?.({
         progress: 95,
         stage: 'complete',
         message: 'Upload complete! Video ready for streaming!'
       });
 
-      // Step 3: Video is immediately ready (no processing delays like Mux!)
+      // Step 4: Video is immediately ready (no processing delays like Mux!)
       const videoData: StreamingVideoData = {
-        videoId: uploadData.videoId,
+        videoId: uploadData.fileName.replace(/^videos\/.*?\//, '').replace(/\.[^.]+$/, ''), // Extract clean ID from filename
         fileName: uploadData.fileName,
-        streamingUrl: uploadData.streamingUrl,
-        thumbnailUrl: uploadData.thumbnailUrl,
+        streamingUrl: uploadData.playbackUrl, // Backend provides playbackUrl
+        thumbnailUrl: thumbnailUrl, // Use Firebase thumbnail or fallback to video URL
         uploadedAt: new Date().toISOString(),
         status: 'ready',
         metadata: options.metadata
@@ -195,16 +236,21 @@ class GoogleCloudVideoService {
       console.log('📤 Uploading to Google Cloud Storage:', videoBlob.size, 'bytes');
 
       // Upload to Google Cloud using signed URL
+      // IMPORTANT: Content-Type must match exactly what was used during signing
       const uploadResponse = await fetch(signedUrl, {
         method: 'PUT',
         headers: {
-          'Content-Type': videoBlob.type || 'video/mp4',
+          'Content-Type': 'video/mp4', // Always use video/mp4 to match signed URL
         },
         body: videoBlob,
       });
 
       if (!uploadResponse.ok) {
-        throw new Error(`Google Cloud upload failed: ${uploadResponse.status}`);
+        const errorText = await uploadResponse.text();
+        console.error('❌ Upload failed with status:', uploadResponse.status);
+        console.error('❌ Upload error response:', errorText);
+        console.error('❌ Upload headers sent:', JSON.stringify({'Content-Type': 'video/mp4'}));
+        throw new Error(`Google Cloud upload failed: ${uploadResponse.status} - ${errorText}`);
       }
 
       onProgress?.(100);
@@ -316,4 +362,6 @@ class GoogleCloudVideoService {
 }
 
 // Export singleton instance
-export default new GoogleCloudVideoService();
+const googleCloudVideoService = new GoogleCloudVideoService();
+export { GoogleCloudVideoService, googleCloudVideoService };
+export default googleCloudVideoService;

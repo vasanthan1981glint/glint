@@ -19,8 +19,7 @@ import {
     View
 } from 'react-native';
 
-// Import components
-import MuxVideoPlayer from '../components/MuxVideoPlayer';
+import { ResizeMode, Video } from 'expo-av';
 
 const { width, height } = Dimensions.get('window');
 
@@ -31,7 +30,9 @@ interface VideoData {
   userPhotoURL?: string;
   caption: string;
   playbackUrl: string;
+  streamingUrl?: string; // Google Cloud uses streamingUrl
   playbackId: string;
+  videoId?: string; // Google Cloud uses videoId
   thumbnailUrl?: string;
   assetId: string;
   duration?: number;
@@ -223,14 +224,13 @@ export default function VideoFeed({ userId, refreshing = false, onRefresh }: Vid
   const renderVideoItem = ({ item }: { item: VideoData }) => (
     <View style={styles.videoItem}>
       {/* Video Player */}
-      <MuxVideoPlayer
-        playbackId={item.playbackId}
-        playbackUrl={item.playbackUrl}
-        thumbnailUrl={item.thumbnailUrl}
+      <Video
+        source={{ uri: item.streamingUrl || item.playbackUrl }}
         style={styles.videoPlayer}
-        autoplay={false}
-        muted={true}
-        onPlaybackStatusUpdate={(status) => {
+        shouldPlay={false}
+        isMuted={true}
+        resizeMode={ResizeMode.COVER}
+        onPlaybackStatusUpdate={(status: any) => {
           // Track when video starts playing for view counting
           if (status.isLoaded && status.shouldPlay && !status.positionMillis) {
             incrementView(item.id);

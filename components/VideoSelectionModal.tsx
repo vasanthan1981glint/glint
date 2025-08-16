@@ -3,7 +3,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -11,14 +10,12 @@ interface VideoSelectionModalProps {
   visible: boolean;
   onClose: () => void;
   onRecordVideo?: () => void;
-  onSelectFromGallery?: () => void;
+  uploadContext?: string;
 }
 
-export default function VideoSelectionModal({ visible, onClose, onRecordVideo, onSelectFromGallery }: VideoSelectionModalProps) {
+export default function VideoSelectionModal({ visible, onClose, onRecordVideo, uploadContext }: VideoSelectionModalProps) {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const [isLoadingCamera, setIsLoadingCamera] = useState(false);
-  const [isLoadingGallery, setIsLoadingGallery] = useState(false);
 
   const recordVideo = async () => {
     try {
@@ -34,7 +31,7 @@ export default function VideoSelectionModal({ visible, onClose, onRecordVideo, o
       }
 
       // Default behavior (for backward compatibility)
-      console.log('🎥 Requesting camera permission...');
+      console.log(`🎥 Requesting camera permission for ${uploadContext || 'default'} upload...`);
       
       // Check if camera is available
       const cameraAvailable = await ImagePicker.getCameraPermissionsAsync();
@@ -59,7 +56,7 @@ export default function VideoSelectionModal({ visible, onClose, onRecordVideo, o
       console.log('📱 Opening camera...');
       
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        mediaTypes: ['videos'],
         allowsEditing: Platform.OS === 'ios', // Only allow editing on iOS for better compatibility
         quality: Platform.OS === 'android' ? 0.8 : 1, // Slightly lower quality on Android for performance
         videoMaxDuration: 60,
@@ -81,28 +78,15 @@ export default function VideoSelectionModal({ visible, onClose, onRecordVideo, o
     }
   };
 
-  const selectFromGallery = async () => {
+  const handleTrendsPress = async () => {
     try {
-      setIsLoadingGallery(true); // Show loading immediately
+      console.log('🔥 Opening gallery for Trends upload...');
       
-      // Call parent function if provided, otherwise use default behavior
-      if (onSelectFromGallery) {
-        onClose();
-        onSelectFromGallery();
-        // Reset loading after a brief delay to allow parent processing
-        setTimeout(() => setIsLoadingGallery(false), 500);
-        return;
-      }
-
-      // Default behavior (for backward compatibility)
-      console.log('📱 Requesting media library permission...');
-      
-      // Check if media library is available
-      const mediaAvailable = await ImagePicker.getMediaLibraryPermissionsAsync();
-      if (!mediaAvailable.canAskAgain && mediaAvailable.status !== 'granted') {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permissionResult.status !== 'granted') {
         Alert.alert(
-          'Photo Library Access Required',
-          'Please enable photo library access in your device settings to select videos.',
+          'Permission Required',
+          'Please grant photo library access to select videos for Trends.',
           [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Open Settings', onPress: () => ImagePicker.requestMediaLibraryPermissionsAsync() }
@@ -111,46 +95,69 @@ export default function VideoSelectionModal({ visible, onClose, onRecordVideo, o
         return;
       }
 
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      console.log('📊 Permission status:', permissionResult.status);
-
-      if (permissionResult.status !== 'granted') {
-        Alert.alert('Permission Required', 'Permission to access media library is required!');
-        return;
-      }
-
-      console.log('🎬 Opening video picker...');
-
-      const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        allowsEditing: Platform.OS === 'ios', // Only allow editing on iOS
-        quality: Platform.OS === 'android' ? 0.8 : 1, // Better performance on Android
+        allowsEditing: Platform.OS === 'ios',
+        quality: 1,
         videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality,
       });
 
-      if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets.length > 0) {
-        const videoUri = pickerResult.assets[0].uri;
-        console.log('✅ Video selected:', videoUri);
-        
-        // BYPASS old me.tsx flow entirely - go straight to caption screen
-        console.log('🚀 BYPASSING thumbnail generation, going direct to caption');
-        
-        setIsLoadingGallery(true);
-        
-        setTimeout(() => {
-          onClose();
-          // Navigate directly to caption page - this bypasses all thumbnail generation
-          router.push(`/caption/${encodeURIComponent(videoUri)}`);
-          setIsLoadingGallery(false);
-        }, 50);
-      } else {
-        setIsLoadingGallery(false);
+      if (!result.canceled && result.assets?.[0]) {
+        const videoUri = result.assets[0].uri;
+        console.log('✅ Video selected for Trends:', videoUri);
+        onClose();
+        // Navigate to caption screen with Trends context
+        router.push(`/caption/${encodeURIComponent(videoUri)}?uploadTab=Trends`);
       }
     } catch (error: any) {
-      console.error('❌ Error selecting video:', error);
-      Alert.alert('Selection Error', error.message || 'Failed to select video. Please try again.');
-    } finally {
-      setIsLoadingGallery(false); // Hide loading
+      console.error('❌ Error selecting video for Trends:', error);
+      Alert.alert('Selection Error', 'Failed to select video for Trends. Please try again.');
+    }
+  };
+
+  const handleGalleryPress = async () => {
+    try {
+      onClose();
+      
+      // Request permission for media library access
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Please grant photo library access to select videos from your gallery.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => ImagePicker.requestMediaLibraryPermissionsAsync() }
+          ]
+        );
+        return;
+      }
+
+      console.log(`📱 Opening gallery for video selection (${uploadContext || 'default'} upload)...`);
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const videoUri = result.assets[0].uri;
+        console.log('✅ Video selected from gallery:', videoUri);
+        
+        // Navigate to caption page with upload context
+        if (uploadContext) {
+          router.push({
+            pathname: `/caption/${encodeURIComponent(videoUri)}` as any,
+            params: { context: uploadContext }
+          });
+        } else {
+          router.push(`/caption/${encodeURIComponent(videoUri)}` as any);
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Error selecting video from gallery:', error);
+      Alert.alert('Selection Error', 'Failed to select video from gallery. Please try again.');
     }
   };
 
@@ -163,71 +170,75 @@ export default function VideoSelectionModal({ visible, onClose, onRecordVideo, o
       statusBarTranslucent={true}
     >
       <View style={styles.overlay}>
-        <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+        <View style={styles.container}>
           <View style={styles.header}>
-            <Text style={styles.title}>Add Video</Text>
-            <TouchableOpacity 
-              onPress={onClose} 
-              style={styles.closeButton}
-              disabled={isLoadingCamera || isLoadingGallery}
-            >
-              <Ionicons name="close" size={24} color={isLoadingCamera || isLoadingGallery ? "#ccc" : "#000"} />
+            <Text style={styles.title}>
+              {uploadContext ? `Create for ${uploadContext}` : 'Create'}
+            </Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <Ionicons name="close" size={24} color="#000" />
             </TouchableOpacity>
           </View>
-
+          
+          {uploadContext && (
+            <View style={styles.contextIndicator}>
+              <Ionicons 
+                name={uploadContext === 'Trends' ? 'trending-up' : uploadContext === 'Glints' ? 'sparkles' : 'bookmark'} 
+                size={16} 
+                color="#007AFF" 
+              />
+              <Text style={styles.contextText}>
+                Uploading to {uploadContext} tab
+              </Text>
+            </View>
+          )}
+          
           <View style={styles.options}>
-            <TouchableOpacity 
-              style={[styles.option, isLoadingCamera && styles.optionDisabled]} 
-              onPress={recordVideo}
-              disabled={isLoadingCamera || isLoadingGallery}
-            >
-              <View style={styles.iconContainer}>
-                {isLoadingCamera ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Ionicons name="camera" size={screenWidth > 400 ? 32 : 28} color="#fff" />
-                )}
-              </View>
-              <View style={styles.optionContent}>
-                <Text style={styles.optionText}>
-                  {isLoadingCamera ? 'Opening Camera...' : 'Camera'}
-                </Text>
-                <Text style={styles.optionSubtext}>Record a new video</Text>
-              </View>
-              {!isLoadingCamera && <Ionicons name="chevron-forward" size={20} color="#ccc" />}
-            </TouchableOpacity>
+            <View style={styles.regularOptionsRow}>
+              <TouchableOpacity 
+                style={[styles.option, isLoadingCamera && styles.optionDisabled]} 
+                onPress={recordVideo}
+                disabled={isLoadingCamera}
+              >
+                <View style={styles.iconContainer}>
+                  {isLoadingCamera ? (
+                    <ActivityIndicator size="small" color="#1DA1F2" />
+                  ) : (
+                    <Ionicons name="camera" size={24} color="#1DA1F2" />
+                  )}
+                </View>
+                <Text style={styles.optionText}>Camera</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.option} 
+                onPress={handleGalleryPress}
+              >
+                <View style={styles.iconContainer}>
+                  <Ionicons name="images" size={24} color="#1DA1F2" />
+                </View>
+                <Text style={styles.optionText}>Gallery</Text>
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity 
-              style={[styles.option, isLoadingGallery && styles.optionDisabled]} 
-              onPress={selectFromGallery}
-              disabled={isLoadingCamera || isLoadingGallery}
+              style={styles.trendsOption} 
+              onPress={handleTrendsPress}
             >
-              <View style={[styles.iconContainer, { backgroundColor: '#8E4EC6' }]}>
-                {isLoadingGallery ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Ionicons name="image" size={screenWidth > 400 ? 32 : 28} color="#fff" />
-                )}
+              <View style={styles.trendsIconContainer}>
+                <Ionicons name="trending-up" size={24} color="#fff" />
               </View>
-              <View style={styles.optionContent}>
-                <Text style={styles.optionText}>
-                  {isLoadingGallery ? 'Opening Gallery...' : 'Gallery'}
-                </Text>
-                <Text style={styles.optionSubtext}>Choose from your videos</Text>
-              </View>
-              {!isLoadingGallery && <Ionicons name="chevron-forward" size={20} color="#ccc" />}
+              <Text style={styles.trendsOptionText}>Upload to Trends</Text>
             </TouchableOpacity>
           </View>
         </View>
         
         {/* Global Loading Overlay */}
-        {(isLoadingCamera || isLoadingGallery) && (
+        {isLoadingCamera && (
           <View style={styles.loadingOverlay}>
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.loadingText}>
-                {isLoadingCamera ? 'Opening Camera...' : 'Opening Gallery...'}
-              </Text>
+              <Text style={styles.loadingText}>Opening Camera...</Text>
             </View>
           </View>
         )}
@@ -246,19 +257,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingBottom: 20,
-    maxHeight: screenHeight * 0.6, // Responsive height
+    paddingBottom: 40,
+    maxHeight: screenHeight * 0.4,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: screenWidth > 400 ? 20 : 16,
+    padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#e0e0e0',
   },
   title: {
-    fontSize: screenWidth > 400 ? 20 : 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#000',
   },
@@ -266,42 +277,48 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   options: {
-    padding: screenWidth > 400 ? 20 : 16,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  regularOptionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
   option: {
-    flexDirection: 'row',
+    flex: 1,
     alignItems: 'center',
-    paddingVertical: screenWidth > 400 ? 15 : 12,
-    paddingHorizontal: screenWidth > 400 ? 16 : 12,
-    borderRadius: 12,
-    marginBottom: 15,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginHorizontal: 4,
     backgroundColor: '#f8f9fa',
-    minHeight: screenWidth > 400 ? 70 : 60, // Ensure consistent height
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
   optionDisabled: {
     opacity: 0.6,
-    backgroundColor: '#f0f0f0',
   },
   iconContainer: {
-    width: screenWidth > 400 ? 50 : 45,
-    height: screenWidth > 400 ? 50 : 45,
-    borderRadius: screenWidth > 400 ? 25 : 22.5,
-    backgroundColor: '#FF3B30',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 15,
+    marginRight: 16,
   },
   optionContent: {
     flex: 1,
     justifyContent: 'center',
   },
   optionText: {
-    fontSize: screenWidth > 400 ? 18 : 16,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '500',
     color: '#000',
   },
   optionSubtext: {
-    fontSize: screenWidth > 400 ? 14 : 12,
+    fontSize: 14,
     color: '#666',
     marginTop: 2,
   },
@@ -332,5 +349,49 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
     marginTop: 12,
+  },
+  contextIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F8FF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginHorizontal: 20,
+    marginBottom: 10,
+    borderRadius: 8,
+    gap: 8,
+  },
+  contextText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  trendsOption: {
+    backgroundColor: '#FF4500',
+    borderRadius: 12,
+    alignItems: 'center',
+    paddingVertical: 20,
+    marginHorizontal: 4,
+    marginTop: 8,
+    shadowColor: '#FF4500',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  trendsIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  trendsOptionText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

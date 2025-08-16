@@ -28,6 +28,7 @@ interface EnhancedVideoGridProps {
   refreshTrigger?: number;
   onVideoPress?: (video: VideoData) => void;
   userId?: string; // Optional userId to show specific user's videos
+  contentFilter?: 'glint' | 'trending'; // Filter videos by content type
 }
 
 interface VideoData {
@@ -46,7 +47,7 @@ interface VideoData {
   isDeleting?: boolean;
 }
 
-const EnhancedVideoGrid: React.FC<EnhancedVideoGridProps> = ({ refreshTrigger, onVideoPress, userId }) => {
+const EnhancedVideoGrid: React.FC<EnhancedVideoGridProps> = ({ refreshTrigger, onVideoPress, userId, contentFilter }) => {
   const { user } = useAuth();
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +62,9 @@ const EnhancedVideoGrid: React.FC<EnhancedVideoGridProps> = ({ refreshTrigger, o
 
   // Determine which user's videos to fetch
   const targetUserId = userId || user?.uid;
+
+  // Default content filter to 'glint' if not specified to ensure proper filtering
+  const effectiveContentFilter = contentFilter || 'glint';
 
   useEffect(() => {
     if (targetUserId) {
@@ -228,15 +232,29 @@ const EnhancedVideoGrid: React.FC<EnhancedVideoGridProps> = ({ refreshTrigger, o
       console.log('🎬 Loading videos for user:', targetUserId);
       console.log('📋 Load more:', loadMore);
       console.log('📊 Current videos count:', videos.length);
+      console.log('🎯 Content filter:', effectiveContentFilter);
 
-      // Unlimited scroll - load many videos for the target user
-      // TEMPORARY FIX: Remove processed filter to avoid composite index requirement
-      const videosQuery = query(
-        collection(db, 'videos'),
-        where('userId', '==', targetUserId),
-        // where('processed', '==', true), // Temporarily commented out to avoid index requirement
-        limit(loadMore ? videos.length + 50 : 200)
-      );
+      // Build query based on content filter
+      let videosQuery;
+      
+      if (effectiveContentFilter === 'trending') {
+        // For trending content, look for videos uploaded to Trends tab
+        videosQuery = query(
+          collection(db, 'videos'),
+          where('userId', '==', targetUserId),
+          where('uploadTab', '==', 'Trends'),
+          limit(loadMore ? videos.length + 50 : 200)
+        );
+        console.log('🔥 Querying for trending videos with uploadTab = "Trends"');
+      } else {
+        // For glint content, get all user videos (we'll filter out Trends uploads below)
+        videosQuery = query(
+          collection(db, 'videos'),
+          where('userId', '==', targetUserId),
+          limit(loadMore ? videos.length + 50 : 200)
+        );
+        console.log('💎 Querying for glint videos (filtering out Trends uploads)');
+      }
 
       console.log('🔍 Executing Firebase query for user videos...');
       const querySnapshot = await getDocs(videosQuery);
@@ -250,10 +268,34 @@ const EnhancedVideoGrid: React.FC<EnhancedVideoGridProps> = ({ refreshTrigger, o
         console.log('📹 Processing video document:', doc.id);
         console.log('   - Asset ID:', data.assetId);
         console.log('   - User ID:', data.userId);
+        console.log('   - Upload Tab:', data.uploadTab);
+        console.log('   - Content Type:', data.contentType);
+        console.log('   - Content Filter:', effectiveContentFilter);
         console.log('   - Processed:', data.processed);
         console.log('   - Status:', data.status);
         console.log('   - Playback URL:', data.playbackUrl?.substring(0, 50) + '...');
         console.log('   - Thumbnail URL:', data.thumbnailUrl?.substring(0, 50) + '...');
+        
+        // Additional filtering based on content filter for glint videos
+        if (effectiveContentFilter === 'glint') {
+          // For glint tab, exclude videos that were specifically uploaded to Trends
+          if (data.uploadTab === 'Trends') {
+            console.log(`🚫 FILTERED OUT: Video ${doc.id} uploaded to Trends tab, excluding from Glints`);
+            return;
+          } else {
+            console.log(`✅ INCLUDED: Video ${doc.id} not uploaded to Trends, including in Glints`);
+          }
+        }
+        
+        if (effectiveContentFilter === 'trending') {
+          // For trending tab, only include videos uploaded to Trends
+          if (data.uploadTab !== 'Trends') {
+            console.log(`🚫 FILTERED OUT: Video ${doc.id} not uploaded to Trends tab, excluding from Trends`);
+            return;
+          } else {
+            console.log(`✅ INCLUDED: Video ${doc.id} uploaded to Trends, including in Trends`);
+          }
+        }
         
         // FIXED: Only include videos with valid playback URLs to prevent broken videos
         if (!data.playbackUrl || data.playbackUrl.trim() === '') {

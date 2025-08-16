@@ -27,6 +27,7 @@ export interface UploadJobInfo {
   startTime: number;
   status: 'pending' | 'uploading' | 'completed' | 'failed';
   progress: BackgroundUploadProgress;
+  uploadContext?: 'Glints' | 'Trends'; // Track upload context
 }
 
 class BackgroundUploadService {
@@ -102,13 +103,15 @@ class BackgroundUploadService {
   async startBackgroundUpload(
     videoUri: string,
     caption: string,
-    customThumbnail?: string
+    customThumbnail?: string,
+    uploadContext?: 'Glints' | 'Trends'
   ): Promise<string> {
     try {
       console.log('🚀 BACKGROUND SERVICE: Starting upload process...');
       console.log('📹 Video URI:', videoUri);
       console.log('📝 Caption:', caption);
       console.log('📸 Custom thumbnail:', customThumbnail);
+      console.log('🎯 Upload context:', uploadContext || 'Glints (default)');
       
       // Generate unique upload ID
       const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -136,6 +139,7 @@ class BackgroundUploadService {
         userId: user.uid,
         startTime: Date.now(),
         status: 'pending',
+        uploadContext: uploadContext || 'Glints', // Default to Glints if not specified
         progress: {
           stage: 'preparing',
           progress: 0,
@@ -205,48 +209,52 @@ class BackgroundUploadService {
       uploadJob.progress.message = 'Uploading to cloud...';
       this.updateUploadProgress(uploadId, uploadJob.progress);
 
-      // Import enhanced Mux service for professional video hosting
-      console.log('📦 Importing Mux service...');
-      const { default: EnhancedMuxService } = await import('./enhancedMuxService');
-      console.log('✅ Mux service imported successfully');
+      // Import Google Cloud service for reliable video hosting
+      console.log('📦 Importing Google Cloud service...');
+      const GoogleCloudVideoService = await import('./googleCloudVideoService');
+      console.log('✅ Google Cloud service imported successfully');
 
-      // Upload video with progress tracking using Mux (professional hosting)
-      console.log('🎬 Starting Mux upload...');
+      // Upload video with progress tracking using Google Cloud (reliable hosting)
+      console.log('☁️ Starting Google Cloud upload...');
       let uploadedVideo;
       
       try {
-        uploadedVideo = await EnhancedMuxService.uploadVideoWithChunks(
-          decodeURIComponent(uploadJob.videoUri),
-          (progress) => {
-            console.log('📊 Mux upload progress:', progress);
+        const videoService = GoogleCloudVideoService.default;
+        uploadedVideo = await videoService.uploadVideo({
+          videoUri: decodeURIComponent(uploadJob.videoUri),
+          title: uploadJob.caption || 'Video Upload',
+          metadata: {
+            userId: uploadJob.userId,
+            caption: uploadJob.caption,
+            uploadId: uploadId
+          },
+          onProgress: (progress) => {
+            console.log('📊 Google Cloud upload progress:', progress);
             // Update progress in real-time
             uploadJob.progress = {
               ...uploadJob.progress,
-              stage: progress.stage,
+              stage: progress.stage === 'creating' ? 'preparing' : progress.stage,
               progress: progress.progress,
-              message: progress.message,
-              fileSize: progress.fileSize,
-              uploadSpeed: progress.uploadSpeed,
-              timeRemaining: progress.timeRemaining
+              message: progress.message || 'Uploading...'
             };
             this.updateUploadProgress(uploadId, uploadJob.progress);
           }
-        );
-        console.log('✅ Mux upload completed:', uploadedVideo);
-      } catch (muxError: any) {
-        console.warn('⚠️ Mux upload failed:', muxError.message);
+        });
+        console.log('✅ Google Cloud upload completed:', uploadedVideo);
+      } catch (googleCloudError: any) {
+        console.warn('⚠️ Google Cloud upload failed:', googleCloudError.message);
         
-        // Provide more specific error messages based on the error type
+                // Provide more specific error messages based on the error type
         let userMessage = 'Upload failed. Tap to retry.';
         
-        if (muxError.message.includes('processing is taking longer than expected')) {
-          userMessage = 'Video processing timed out. This video may need more time - please try again.';
-        } else if (muxError.message.includes('processing failed')) {
+        if (googleCloudError.message.includes('too large') || googleCloudError.message.includes('size')) {
+          userMessage = 'Video file too large. Please compress or trim your video.';
+        } else if (googleCloudError.message.includes('processing failed')) {
           userMessage = 'Video processing failed. Please check your video and try again.';
-        } else if (muxError.message.includes('connection')) {
-          userMessage = 'Connection error. Please check your internet and try again.';
-        } else if (muxError.message.includes('timeout')) {
-          userMessage = 'Processing took too long. Please try uploading again.';
+        } else if (googleCloudError.message.includes('connection')) {
+          userMessage = 'Network connection failed. Please check your internet and try again.';
+        } else if (googleCloudError.message.includes('timeout')) {
+          userMessage = 'Upload timed out. Please try again with a smaller video.';
         }
         
         uploadJob.progress = {
@@ -257,11 +265,11 @@ class BackgroundUploadService {
         };
         this.updateUploadProgress(uploadId, uploadJob.progress);
         
-        throw new Error(`Mux upload failed: ${muxError.message}. Please try uploading your video again - some videos take longer to process.`);
+        throw new Error(`Google Cloud upload failed: ${googleCloudError.message}. Please try uploading your video again.`);
       }
 
-      if (!uploadedVideo || !uploadedVideo.assetId) {
-        throw new Error('Upload failed - no video URL returned from Mux');
+      if (!uploadedVideo || !uploadedVideo.videoId) {
+        throw new Error('Upload failed - no video ID returned from Google Cloud');
       }
 
       console.log('💾 Starting Firebase save...');
@@ -357,7 +365,7 @@ class BackgroundUploadService {
           const { ref, uploadBytes, getDownloadURL, getStorage } = await import('firebase/storage');
           
           const storage = getStorage();
-          const thumbnailRef = ref(storage, `thumbnails/${uploadedVideo.assetId}_custom.jpg`);
+          const thumbnailRef = ref(storage, `thumbnails/${uploadedVideo.videoId}_custom.jpg`);
           
           const response = await fetch(uploadJob.customThumbnail);
           const blob = await response.blob();
@@ -371,11 +379,11 @@ class BackgroundUploadService {
         }
       }
 
-      // Create video document
+      // Create video document for Google Cloud
       const videoDoc = {
         userId: uploadJob.userId,
-        assetId: uploadedVideo.assetId,
-        playbackUrl: uploadedVideo.playbackUrl,
+        assetId: uploadedVideo.videoId, // Google Cloud uses videoId
+        playbackUrl: uploadedVideo.streamingUrl, // Google Cloud uses streamingUrl
         thumbnailUrl: thumbnailUrl,
         thumbnailType: uploadJob.customThumbnail ? 'custom' : 'auto',
         createdAt: new Date().toISOString(),
@@ -384,24 +392,48 @@ class BackgroundUploadService {
         views: 0,
         likes: 0,
         processed: true,
-        status: uploadedVideo.status,
+        status: 'ready', // Google Cloud videos are immediately ready
         uploadMethod: 'background',
         uploadId: uploadJob.id,
         isRealVideo: true,
-        hasCustomThumbnail: !!uploadJob.customThumbnail
+        hasCustomThumbnail: !!uploadJob.customThumbnail,
+        uploadTab: uploadJob.uploadContext || 'Glints', // Track which tab the video was uploaded from
+        contentType: uploadJob.uploadContext === 'Trends' ? 'trending' : 'glint' // Track content type
       };
 
       console.log('📝 Video document to save:', videoDoc);
-      console.log('🎯 Document ID (assetId):', uploadedVideo.assetId);
+      console.log('🎯 Document ID (videoId):', uploadedVideo.videoId);
 
       console.log('💾 Saving to Firebase...');
-      await setDoc(doc(db, 'videos', uploadedVideo.assetId), videoDoc);
+      await setDoc(doc(db, 'videos', uploadedVideo.videoId), videoDoc);
       console.log('✅ Video document saved to Firebase successfully');
+      
+      // Also save to posts collection for feed display
+      console.log('📝 Saving to posts collection for feed...');
+      await setDoc(doc(db, 'posts', uploadedVideo.videoId), {
+        ...videoDoc,
+        type: 'video',
+        uploadTab: uploadJob.uploadContext || 'Glints',
+        contentType: uploadJob.uploadContext === 'Trends' ? 'trending' : 'glint'
+      });
+      console.log('✅ Post document saved to Firebase successfully');
+      
+      // If uploaded for Trends, also save to trends collection
+      if (uploadJob.uploadContext === 'Trends') {
+        console.log('🔥 Saving to trends collection for Trends tab...');
+        await setDoc(doc(db, 'trends', uploadedVideo.videoId), {
+          ...videoDoc,
+          trendingScore: 0,
+          trendingDate: new Date().toISOString(),
+          category: 'user-generated'
+        });
+        console.log('✅ Trend document saved to Firebase successfully');
+      }
       
       // VERIFICATION: Immediately check if the document was saved
       try {
         console.log('🔍 VERIFICATION: Checking if document was saved...');
-        const savedDoc = await getDoc(doc(db, 'videos', uploadedVideo.assetId));
+        const savedDoc = await getDoc(doc(db, 'videos', uploadedVideo.videoId));
         if (savedDoc.exists()) {
           console.log('🔍 VERIFICATION: ✅ Video document confirmed in Firebase:', savedDoc.data());
         } else {

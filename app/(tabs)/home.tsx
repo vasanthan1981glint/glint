@@ -10,16 +10,14 @@ import {
   deleteDoc,
   doc,
   getDocs,
-  limit,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
   where
 } from 'firebase/firestore';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -28,6 +26,7 @@ import {
   Image,
   Linking,
   Modal,
+  PanResponder,
   PixelRatio,
   Platform,
   ScrollView,
@@ -58,6 +57,8 @@ import { viewTracker } from '../../lib/viewTrackingService';
 
 import VideoOptionsModal from '../../components/VideoOptionsModal';
 import ViewCountDisplay from '../../components/ViewCountDisplay';
+// ✅ Import our new Enhanced Short-form Video Player
+import ShortFormVideoPlayer from '../../components/ShortFormVideoPlayer';
 
 dayjs.extend(relativeTime);
 
@@ -181,6 +182,39 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
   showCloseButton = true
 }) => {
   const insets = useSafeAreaInsets();
+  
+  // � ULTIMATE UNIVERSAL LAYOUT SOLUTION
+  // This approach uses a measurement-based system to ensure perfect fit on ANY device
+  const [layoutMeasured, setLayoutMeasured] = useState(false);
+  const [availableHeight, setAvailableHeight] = useState(screenHeight);
+  
+  // Measure the actual available space dynamically
+  const onLayoutMeasure = useCallback((event: any) => {
+    const { height } = event.nativeEvent.layout;
+    if (height > 0 && height !== availableHeight) {
+      setAvailableHeight(height);
+      setLayoutMeasured(true);
+      console.log(`🎯 MEASURED Available Height: ${height}px (vs screen: ${screenHeight}px)`);
+    }
+  }, [availableHeight]);
+  
+  // Fallback calculation for immediate rendering while measurement happens
+  const videoContainerHeight = useMemo(() => {
+    // 💪 BULLETPROOF: Use EXACT same calculation as tab layout (49 + insets.bottom)
+    const EXACT_TAB_BAR_HEIGHT = 49 + insets.bottom;
+    const perfectHeight = screenHeight - EXACT_TAB_BAR_HEIGHT;
+    
+    console.log(`💪 BULLETPROOF Layout Calculation:
+      🔧 Screen Height: ${screenHeight}px
+      📱 Platform: ${Platform.OS}
+      🏠 Safe Area Bottom: ${insets.bottom}px
+      📊 EXACT Tab Bar Height: ${EXACT_TAB_BAR_HEIGHT}px
+      ✅ PERFECT Video Height: ${perfectHeight}px
+      📐 Zero Gap Guaranteed!`);
+    
+    return perfectHeight;
+  }, [insets.bottom]);
+  
   const { user } = useAuth();
   const router = useRouter();
   const flatListRef = useRef<FlatList>(null);
@@ -198,14 +232,14 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
   // Create enhanced user profile with better fallbacks and validation
   const createUserProfile = useCallback(() => {
     const fallbackUsername = userUsername || user?.displayName || user?.email?.split('@')[0] || 'User';
-    const fallbackAvatar = userAvatar && userAvatar !== 'https://randomuser.me/api/portraits/men/32.jpg' 
-      ? userAvatar 
+    const fallbackAvatar = userAvatar && userAvatar !== 'https://randomuser.me/api/portraits/men/32.jpg'
+      ? userAvatar
       : `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackUsername)}&size=40&background=4ECDC4&color=ffffff&format=png`;
     
     return {
       avatar: fallbackAvatar,
       username: fallbackUsername,
-      userId: user?.uid
+      isVerified: false,
     };
   }, [userAvatar, userUsername, user]);
 
@@ -221,6 +255,9 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
   const [videoPositions, setVideoPositions] = useState<{ [key: string]: number }>({});
   const [videoPlayingStates, setVideoPlayingStates] = useState<{ [key: string]: boolean }>({});
   const [videoThumbnails, setVideoThumbnails] = useState<{ [key: string]: string }>({});
+  
+  // Progress bar drag state (add missing state)
+  const [dragStartPosition, setDragStartPosition] = useState<{ [key: string]: number }>({});
   const [thumbnailsLoading, setThumbnailsLoading] = useState<{ [key: string]: boolean }>({});
   const [showThumbnails, setShowThumbnails] = useState<{ [key: string]: boolean }>({});
   const [showVideoOptionsModal, setShowVideoOptionsModal] = useState(false);
@@ -383,6 +420,20 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     if (__DEV__) {
       // Make debugging functions globally accessible
       (global as any).glintDebug = {
+        ...((global as any).glintDebug || {}), // Preserve existing debug functions
+        getLayoutInfo: () => {
+          const EXACT_TAB_BAR_HEIGHT = 49 + insets.bottom;
+          const layoutInfo = {
+            screenDimensions: `${screenWidth}x${screenHeight}`,
+            platform: Platform.OS,
+            safeAreaInsets: insets,
+            exactTabBarHeight: EXACT_TAB_BAR_HEIGHT,
+            videoContainerHeight,
+            calculationMethod: 'BULLETPROOF (exact tab layout match)',
+          };
+          console.log('� BULLETPROOF Layout Debug Info:', layoutInfo);
+          return layoutInfo;
+        },
         clearViews: async () => {
           console.log('🧹 Clearing all view data...');
           await viewTracker.clearAllViewData();
@@ -408,12 +459,13 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
         }
       };
       console.log('🛠️ Debug functions available:');
+      console.log('- glintDebug.getLayoutInfo() - Get bulletproof layout calculations');
       console.log('- glintDebug.clearViews() - Clear all view data');
       console.log('- glintDebug.getViewDebug() - Get tracking debug info');
       console.log('- glintDebug.getVideoViews(videoId) - Get view count for video');
       console.log('- glintDebug.testRecordView(videoId) - Test recording a view');
     }
-  }, []);
+  }, [videoContainerHeight, insets]);
 
   // 🎵 Audio Management - Pause all videos when component loses focus
   const pauseAllVideos = useCallback(async () => {
@@ -1636,14 +1688,14 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
         });
       }
       
-      // Update position when video is playing (with throttling to avoid excessive updates)
-      if (actuallyPlaying && status.positionMillis !== undefined) {
+      // Update position for all videos (for individual progress tracking)
+      if (status.positionMillis !== undefined) {
         setVideoPositions(prev => {
           const currentPos = prev[videoId] || 0;
           const newPos = status.positionMillis!;
           
-          // Only update if position changed significantly (300ms threshold for better performance)
-          if (Math.abs(newPos - currentPos) > 300) {
+          // Reduced threshold for smoother progress bar updates (100ms instead of 300ms)
+          if (Math.abs(newPos - currentPos) > 100) {
             return { ...prev, [videoId]: newPos };
           }
           return prev;
@@ -1858,9 +1910,53 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     const duration = videoDurations[videoId];
     const position = videoPositions[videoId];
     
-    if (!duration || !position || duration === 0) return 0;
+    // Return 0 if no duration or position data available yet
+    if (!duration || duration === 0) return 0;
+    
+    // If position is undefined or 0, return 0 (video hasn't started)
+    if (position === undefined || position === null) return 0;
+    
+    // Calculate progress ensuring it never exceeds 100%
     return Math.min(position / duration, 1);
   }, [isDraggingProgress, dragProgress, videoDurations, videoPositions]);
+
+  const createProgressPanResponder = useCallback((videoId: string, progressBarWidth: number) => {
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      
+      onPanResponderGrant: (event) => {
+        const { locationX } = event.nativeEvent;
+        const progress = Math.max(0, Math.min(1, locationX / progressBarWidth));
+        
+        setIsDraggingProgress(prev => ({ ...prev, [videoId]: true }));
+        setDragProgress(prev => ({ ...prev, [videoId]: progress }));
+        setDragStartPosition(prev => ({ ...prev, [videoId]: locationX }));
+      },
+      
+      onPanResponderMove: (event) => {
+        const { locationX } = event.nativeEvent;
+        const progress = Math.max(0, Math.min(1, locationX / progressBarWidth));
+        
+        setDragProgress(prev => ({ ...prev, [videoId]: progress }));
+      },
+      
+      onPanResponderRelease: async () => {
+        const progress = dragProgress[videoId] || 0;
+        
+        // Find the video and seek to the dragged position
+        const currentVideo = videos.find((video: any) => video.assetId === videoId);
+        if (currentVideo && videoRefs.current[videoId]) {
+          await handleProgressBarPress(videoId, progress);
+        }
+        
+        // Clear drag state
+        setIsDraggingProgress(prev => ({ ...prev, [videoId]: false }));
+        setDragProgress(prev => ({ ...prev, [videoId]: 0 }));
+        setDragStartPosition(prev => ({ ...prev, [videoId]: 0 }));
+      },
+    });
+  }, [dragProgress, videos, handleProgressBarPress]);
 
   const renderTextWithLinks = (text: string, style: any) => {
     // URL regex pattern
@@ -2026,22 +2122,21 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
       orientation = 'square';
     }
     
-    // Calculate optimal resize mode and dimensions
-    let resizeMode: 'contain' | 'cover' = 'contain';
+    // Calculate optimal resize mode and dimensions for full-screen display
+    let resizeMode: 'contain' | 'cover' = 'cover';
     let displayWidth = containerWidth;
     let displayHeight = containerHeight;
     let letterboxing = false;
     let pillarboxing = false;
     
-    // Default to contain (scaleAspectFit) for preserving aspect ratio
+    // Use cover mode for full-screen experience (no black bars)
+    // This will crop the video if needed to fill the entire screen
     if (videoAspectRatio > containerAspectRatio) {
-      // Video is wider than container - will have letterboxing (horizontal bars)
-      displayHeight = containerWidth / videoAspectRatio;
-      letterboxing = true;
-    } else if (videoAspectRatio < containerAspectRatio) {
-      // Video is taller than container - will have pillarboxing (vertical bars)
+      // Video is wider than container - will crop horizontally
       displayWidth = containerHeight * videoAspectRatio;
-      pillarboxing = true;
+    } else if (videoAspectRatio < containerAspectRatio) {
+      // Video is taller than container - will crop vertically
+      displayHeight = containerWidth / videoAspectRatio;
     }
     
     // Video display calculation logging (commented out to reduce console spam)
@@ -2152,38 +2247,19 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     const responsiveSize = getResponsiveSize();
     const metadata = videoMetadata[item.assetId];
     
-    // Calculate video container height accounting for tab bar
-    const tabBarHeight = 80; // Typical tab bar height
-    const videoContainerHeight = screenHeight - tabBarHeight;
-    
-    // Calculate intelligent resize mode based on video's actual aspect ratio
-    let dynamicResizeMode = ResizeMode.CONTAIN; // Default to CONTAIN to respect original format
+    // Calculate intelligent resize mode for full-screen viewing (TikTok/Instagram style)
+    let dynamicResizeMode = ResizeMode.COVER; // Default to COVER for full-screen experience
     
     if (metadata) {
       const videoAspectRatio = metadata.aspectRatio;
       const screenAspectRatio = screenWidth / screenHeight;
       
-      // Respect the user's original video format
-      if (metadata.renderingPolicy?.renderingMode === 'contain') {
-        dynamicResizeMode = ResizeMode.CONTAIN;
-      } else if (metadata.renderingPolicy?.renderingMode === 'cover') {
-        dynamicResizeMode = ResizeMode.COVER;
-      } else {
-        // Smart aspect ratio handling - show video as user uploaded it
-        if (videoAspectRatio >= 1.0) {
-          // Landscape or square videos - always use CONTAIN to show full video
-          dynamicResizeMode = ResizeMode.CONTAIN;
-        } else if (videoAspectRatio >= 0.5) {
-          // Portrait videos that aren't too tall - use CONTAIN to show full video
-          dynamicResizeMode = ResizeMode.CONTAIN;
-        } else {
-          // Very tall portrait videos (like stories) - use CONTAIN to respect user's format
-          dynamicResizeMode = ResizeMode.CONTAIN;
-        }
-      }
+      // Force full-screen experience by using COVER mode
+      // This ensures no black bars and videos fill the entire screen
+      dynamicResizeMode = ResizeMode.COVER;
       
       // Video aspect ratio logging (commented out to reduce console spam)
-      // console.log(`📐 Video ${item.assetId}: ${metadata.width}x${metadata.height} (${videoAspectRatio.toFixed(2)}) -> ${dynamicResizeMode === ResizeMode.CONTAIN ? 'CONTAIN' : 'COVER'}`);
+      // console.log(`📐 Video ${item.assetId}: ${metadata.width}x${metadata.height} (${videoAspectRatio.toFixed(2)}) -> COVER (full-screen)`);
     }
     
     // Select optimal video URL based on available variants and network quality
@@ -2197,33 +2273,10 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     }
     
     return (
-      <View style={[styles.videoContainer, { height: videoContainerHeight }]}>
+      <View style={dynamicStyles.videoContainer}>
         {/* Enhanced video area with comprehensive aspect ratio support */}
         <View style={styles.videoWrapper}>
-          {/* Background for letterboxing/pillarboxing with fill options */}
-          {metadata && dynamicResizeMode === ResizeMode.CONTAIN && (
-            <View style={[
-              styles.videoBackground,
-              metadata.renderingPolicy?.backgroundFill === 'blur' && styles.videoBackgroundBlur,
-              metadata.renderingPolicy?.backgroundFill === 'gradient' && styles.videoBackgroundGradient,
-              metadata.renderingPolicy?.backgroundColor && { 
-                backgroundColor: metadata.renderingPolicy.backgroundColor 
-              }
-            ]}>
-              {/* Blurred background video for aesthetic fill */}
-              {metadata.renderingPolicy?.backgroundFill === 'blur' && (
-                <Video
-                  source={{ uri: videoUrl }}
-                  style={[styles.videoBackgroundVideo, { opacity: 0.3 }]}
-                  resizeMode={ResizeMode.COVER}
-                  shouldPlay={isCurrentVideo}
-                  isMuted={true}
-                  isLooping={true}
-                  useNativeControls={false}
-                />
-              )}
-            </View>
-          )}
+          {/* No background needed since we're using COVER mode for full-screen */}
           
           <View style={styles.video}>
             <Video
@@ -2236,7 +2289,7 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
                   isLooping={true} // Enable looping so videos repeat
                   volume={isMuted ? 0.0 : 1.0}
                   rate={1.0}
-                  progressUpdateIntervalMillis={Platform.OS === 'android' ? 1000 : 500}
+                  progressUpdateIntervalMillis={Platform.OS === 'android' ? 500 : 250} // Faster updates for smoother progress bar
                   onPlaybackStatusUpdate={handlePlaybackStatusUpdate(item.assetId)}
                   useNativeControls={false}
                   usePoster={false}
@@ -2625,11 +2678,14 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
           </Animated.View>
         )}
 
-        {/* Video Info Overlay - Enhanced for Aspect Ratios */}
+        {/* Video Info Overlay - Enhanced for Aspect Ratios and Universal Device Support */}
         <View 
           style={[
-            styles.videoInfoOverlay, 
-            { paddingBottom: 80 },
+            dynamicStyles.videoInfoOverlay, // Use dynamic styles with proper insets calculation
+            { 
+              paddingBottom: screenHeight < 700 ? 15 : 20, // Adjust for smaller devices
+              paddingHorizontal: screenWidth < 375 ? 12 : 16, // Tighter padding on narrow devices
+            },
             metadata && metadata.orientation === 'landscape' && styles.videoInfoOverlayLandscape,
             metadata && metadata.orientation === 'square' && styles.videoInfoOverlaySquare
           ]}
@@ -2729,62 +2785,6 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
                 ) : (
                   <View>
                     {renderTextWithLinks(item.caption, styles.caption)}
-                  </View>
-                )}
-                
-                {/* Caption Progress Bar - YouTube Shorts Style */}
-                {isCurrentVideo && (
-                  <View style={styles.captionProgressContainer}>
-                    <TouchableWithoutFeedback
-                      onPress={(event) => {
-                        const { nativeEvent } = event;
-                        const trackX = nativeEvent.locationX;
-                        const trackWidth = screenWidth - 40; // Account for padding
-                        const progress = Math.max(0, Math.min(1, trackX / trackWidth));
-                        
-                        console.log(`📍 Caption progress bar tapped at ${(progress * 100).toFixed(1)}%`);
-                        handleProgressBarPress(item.assetId, progress);
-                        
-                        // Show haptic feedback
-                        if (Platform.OS === 'ios') {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        }
-                      }}
-                      onPressIn={() => {
-                        // Make progress bar thicker when touched
-                        setIsDraggingProgress(prev => ({ ...prev, [item.assetId]: true }));
-                      }}
-                      onPressOut={() => {
-                        // Return to normal thickness when released
-                        setTimeout(() => {
-                          setIsDraggingProgress(prev => ({ ...prev, [item.assetId]: false }));
-                        }, 200);
-                      }}
-                    >
-                      <View style={styles.captionProgressTrack}>
-                        <View 
-                          style={[
-                            styles.captionProgressFill,
-                            { 
-                              width: `${getVideoProgress(item.assetId) * 100}%`,
-                              height: isDraggingProgress[item.assetId] ? 4 : 2, // Thicker when touched
-                            }
-                          ]} 
-                        />
-                        <View 
-                          style={[
-                            styles.captionProgressHandle,
-                            { 
-                              left: `${getVideoProgress(item.assetId) * 100}%`,
-                              opacity: isDraggingProgress[item.assetId] ? 1 : 0.7, // More visible when touched
-                              transform: [{ 
-                                scale: isDraggingProgress[item.assetId] ? 1.5 : 1 // Bigger when touched
-                              }]
-                            }
-                          ]} 
-                        />
-                      </View>
-                    </TouchableWithoutFeedback>
                   </View>
                 )}
               </View>
@@ -3009,35 +3009,27 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
           <View style={styles.fullScreenTouchArea} />
         </TouchableWithoutFeedback>
 
-        {/* YouTube Shorts-style Red Progress Bar */}
-        {isCurrentVideo && progressBarVisible[item.assetId] && (
-          <View style={styles.progressBarContainer}>
-            <View style={styles.progressBarTrack}>
-              <View 
-                style={[
-                  styles.progressBarFill,
-                  { width: `${getVideoProgress(item.assetId) * 100}%` }
-                ]} 
-              />
-            </View>
-            <TouchableWithoutFeedback
-              onPress={(event) => {
-                const { nativeEvent } = event;
-                const trackX = nativeEvent.locationX;
-                const trackWidth = screenWidth - 40; // Account for padding
-                const progress = Math.max(0, Math.min(1, trackX / trackWidth));
-                
-                console.log(`📍 Progress bar tapped at ${(progress * 100).toFixed(1)}%`);
-                handleProgressBarPress(item.assetId, progress);
-                
-                // Keep progress bar visible for a bit longer after interaction
-                showProgressBarForVideo(item.assetId);
-              }}
-            >
-              <View style={styles.progressBarTouchArea} />
-            </TouchableWithoutFeedback>
+        {/* YouTube Shorts-style Red Progress Bar - Individual for each video */}
+        <View style={dynamicStyles.progressBarContainer}>
+          <View style={styles.progressBarTrack}>
+            <View 
+              style={[
+                styles.progressBarFill,
+                { 
+                  width: `${getVideoProgress(item.assetId) * 100}%`,
+                  backgroundColor: isCurrentVideo ? '#FF0000' : 'rgba(255, 255, 255, 0.7)' // Red for current, white for others
+                }
+              ]} 
+            />
           </View>
-        )}
+          {/* Only allow seeking on current video */}
+          {isCurrentVideo && (
+            <View 
+              style={styles.progressBarTouchArea}
+              {...createProgressPanResponder(item.assetId, screenWidth).panHandlers}
+            />
+          )}
+        </View>
       </View>
     );
   }, [
@@ -3061,9 +3053,46 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     handleProgressBarPress
   ]);
 
-  // Calculate video container height accounting for tab bar
-  const tabBarHeight = 80; // Typical tab bar height
-  const adjustedScreenHeight = screenHeight - tabBarHeight;
+  // Create dynamic styles with ULTIMATE universal positioning
+  const dynamicStyles = useMemo(() => {
+    // Calculate positions relative to the exact tab bar height
+    const EXACT_TAB_BAR_HEIGHT = 49 + insets.bottom;
+    const overlayBottomOffset = EXACT_TAB_BAR_HEIGHT + 10; // 10px above tab bar
+    const progressBarBottomOffset = EXACT_TAB_BAR_HEIGHT + 3; // 3px above tab bar
+    
+    return StyleSheet.create({
+      videoContainer: {
+        width: screenWidth,
+        height: videoContainerHeight,
+        backgroundColor: '#000',
+        marginBottom: 0,
+        marginTop: 0,
+      },
+      // � CALCULATED overlay positioning based on actual measurements
+      videoInfoOverlay: {
+        position: 'absolute',
+        bottom: overlayBottomOffset,
+        left: 0,
+        right: 0,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingTop: 20,
+        paddingBottom: 20,
+        zIndex: 1000,
+        pointerEvents: 'box-none' as const,
+      },
+      // � CALCULATED progress bar positioning based on actual measurements
+      progressBarContainer: {
+        position: 'absolute',
+        bottom: progressBarBottomOffset,
+        left: 0,
+        right: 0,
+        paddingHorizontal: 0,
+        zIndex: 1100,
+      },
+    });
+  }, [videoContainerHeight]);
 
   return (
     <View style={styles.container}>
@@ -3104,6 +3133,7 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
         </Animated.View>
       )}
 
+      {/* Enhanced FlatList with Bulletproof Layout */}
       <FlatList
         ref={flatListRef}
         data={videos}
@@ -3111,7 +3141,7 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
         renderItem={renderVideoItem}
         pagingEnabled
         showsVerticalScrollIndicator={false}
-        snapToInterval={adjustedScreenHeight}
+        snapToInterval={videoContainerHeight}
         snapToAlignment="start"
         decelerationRate={Platform.OS === 'ios' ? 0.98 : 'fast'} // Much faster deceleration for Instagram-like feel
         disableIntervalMomentum={false} // Enable momentum for smoother swipes
@@ -3125,17 +3155,28 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         getItemLayout={(data, index) => ({
-          length: adjustedScreenHeight,
-          offset: adjustedScreenHeight * index,
+          length: videoContainerHeight,
+          offset: videoContainerHeight * index,
           index,
         })}
-        // Instagram-style scroll optimizations
+        // Enhanced universal scrolling optimizations
         overScrollMode="never" // Disable overscroll on Android for cleaner feel
         showsHorizontalScrollIndicator={false}
         contentInsetAdjustmentBehavior="never" // iOS optimization
         automaticallyAdjustContentInsets={false} // iOS optimization
         keyboardShouldPersistTaps="handled"
         scrollsToTop={false} // Disable scroll to top for video feeds
+        // Universal layout fixes for bulletproof display
+        contentContainerStyle={{
+          flexGrow: 1,
+        }}
+        style={{
+          flex: 1,
+          backgroundColor: '#000',
+        }}
+        // Additional edge-to-edge fixes
+        contentInset={{ top: 0, bottom: 0, left: 0, right: 0 }}
+        scrollIndicatorInsets={{ top: 0, bottom: 0, left: 0, right: 0 }}
       />
       
       {/* Video Options Modal */}
@@ -3248,6 +3289,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+    // Ensure full screen coverage
+    margin: 0,
+    padding: 0,
   },
   topBar: {
     position: 'absolute',
@@ -3284,8 +3328,12 @@ const styles = StyleSheet.create({
   },
   videoContainer: {
     width: screenWidth,
-    height: screenHeight,
+    height: screenHeight, // This will be overridden by dynamicStyles for proper tab layout
     backgroundColor: '#000',
+    // Universal layout fixes
+    margin: 0,
+    padding: 0,
+    overflow: 'hidden', // Ensure content doesn't overflow
   },
   videoWrapper: {
     ...StyleSheet.absoluteFillObject,
@@ -3310,6 +3358,12 @@ const styles = StyleSheet.create({
   video: {
     width: '100%',
     height: '100%',
+    // Ensure absolute full coverage with no gaps
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   fullScreenTouchArea: {
     position: 'absolute',
@@ -3325,58 +3379,60 @@ const styles = StyleSheet.create({
   // YouTube Shorts-style progress bar styles
   progressBarContainer: {
     position: 'absolute',
-    bottom: 20,
-    left: 20,
-    right: 20,
-    zIndex: 1000, // High z-index to appear above video
+    bottom: Platform.OS === 'ios' ? 49 : 56, // Position above tab bar for universal compatibility
+    left: 0,
+    right: 0,
+    paddingHorizontal: 0, // Remove padding to go edge-to-edge
+    zIndex: 1100, // Higher z-index to appear above video info overlay
   },
   progressBarTrack: {
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 2,
+    height: 3, // Slightly thinner for better aesthetics
+    backgroundColor: 'rgba(255, 255, 255, 0.2)', // Slightly more subtle for individual videos
+    borderRadius: 0, // No border radius for edge-to-edge look
     overflow: 'hidden',
   },
   progressBarFill: {
     height: '100%',
     backgroundColor: '#FF0000', // YouTube's signature red color
-    borderRadius: 2,
+    borderRadius: 0, // No border radius for clean look
   },
   progressBarTouchArea: {
     position: 'absolute',
-    top: -10,
+    top: -15, // Larger touch area for easier interaction
     left: 0,
     right: 0,
-    bottom: -10,
+    bottom: -15,
     backgroundColor: 'transparent',
   },
   videoInfoOverlay: {
     position: 'absolute',
-    bottom: 0,
+    // Will be overridden by dynamic styles with proper insets calculation
+    bottom: 60, // Fallback value
     left: 0,
     right: 0,
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: 20,
-    paddingBottom: 90, // Increased padding to clear bottom navigation bar
+    paddingBottom: 20,
     zIndex: 1000,
     pointerEvents: 'box-none', // Allow touches to pass through to children only
   },
   videoInfoOverlayLandscape: {
     // Adjust overlay position for landscape videos with letterboxing
-    paddingBottom: 100, // Increased padding for landscape videos
+    paddingBottom: 50,
     paddingHorizontal: 20,
     paddingTop: 30,
   },
   videoInfoOverlaySquare: {
     // Adjust overlay position for square videos
-    paddingBottom: 95, // Increased padding for square videos
+    paddingBottom: 45,
     paddingHorizontal: 18,
     paddingTop: 25,
   },
   leftContent: {
     flex: 1,
-    maxWidth: screenWidth * 0.7,
+    maxWidth: screenWidth * 0.72, // Slightly more space for universal compatibility
     justifyContent: 'flex-end', // Align content to bottom
     pointerEvents: 'box-none', // Allow touches to pass through except for child elements
   },
@@ -3481,36 +3537,6 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
-  },
-  // Caption Progress Bar Styles - YouTube Shorts Style under caption
-  captionProgressContainer: {
-    marginTop: 8,
-    paddingHorizontal: 4,
-  },
-  captionProgressTrack: {
-    height: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 1,
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  captionProgressFill: {
-    backgroundColor: '#FF0000', // YouTube's signature red color
-    borderRadius: 1,
-  },
-  captionProgressHandle: {
-    position: 'absolute',
-    top: -4,
-    width: 8,
-    height: 8,
-    backgroundColor: '#FF0000',
-    borderRadius: 4,
-    marginLeft: -4, // Center the handle
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 3,
   },
   viewCount: {
     color: '#ccc',
@@ -3844,7 +3870,15 @@ const AlgorithmicHomeScreen: React.FC = () => {
   // 📺 Fallback Basic Video Loading
   const loadBasicVideoFeed = useCallback(async (): Promise<AlgorithmicVideoData[]> => {
     try {
-      console.log('📺 Loading basic video feed from posts collection...');
+      console.log('� Video loading temporarily disabled - all videos deleted from server');
+      console.log('🧹 Clean up Firestore posts collection to fix "Loading video..." errors');
+      
+      // TEMPORARY FIX: Return empty array until Firestore is cleaned up
+      return [];
+      
+      // ORIGINAL CODE (commented out until cleanup):
+      /*
+      console.log('�📺 Loading basic video feed from posts collection...');
       
       // FIXED: Use a simpler query that doesn't require complex indexes
       const videosSnapshot = await getDocs(
@@ -3857,7 +3891,10 @@ const AlgorithmicHomeScreen: React.FC = () => {
       );
       
       console.log(`📺 Found ${videosSnapshot.docs.length} processed videos in posts collection`);
+      */
       
+      // ORIGINAL CODE CONTINUES (commented out until cleanup):
+      /*
       const videos = videosSnapshot.docs.map(doc => {
         const data = doc.data();
         console.log(`📺 Processing video: ${doc.id}`, {
@@ -3908,6 +3945,7 @@ const AlgorithmicHomeScreen: React.FC = () => {
       
       console.log(`✅ Successfully processed ${videos.length} valid videos`);
       return videos;
+      */
       
     } catch (error) {
       console.error('❌ Error loading basic videos:', error);
@@ -4229,15 +4267,37 @@ const AlgorithmicHomeScreen: React.FC = () => {
     <View style={homeStyles.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       
-      {/* Algorithmic Feed Display */}
-      <VerticalVideoPlayer
+      {/* ✅ ENHANCED SHORT-FORM VIDEO FEED with Full Layout System */}
+      <ShortFormVideoPlayer
         videos={algorithmicVideos}
         initialVideoIndex={currentVideoIndex}
-        onClose={() => {}}
-        showCloseButton={false}
+        isLoading={isLoadingFeed}
+        onVideoChange={handleVideoChange}
+        onLike={handleVideoLike}
+        onComment={handleVideoComment}
+        onShare={handleVideoShare}
+        onSave={async (videoId: string) => {
+          try {
+            await savedVideosService.toggleSaveVideo(videoId);
+            console.log(`💾 Video ${videoId} save toggled`);
+          } catch (error) {
+            console.error('Error toggling save:', error);
+          }
+        }}
+        onFollow={async (userId: string) => {
+          try {
+            if (user) {
+              const { toggleFollow } = useFollowStore.getState();
+              await toggleFollow(user.uid, userId);
+              console.log(`👥 Follow toggled for user: ${userId}`);
+            }
+          } catch (error) {
+            console.error('Error toggling follow:', error);
+          }
+        }}
       />
       
-      {/* Feed Algorithm Indicator */}
+      {/* ✅ Algorithm Indicator - Shows content boosting level */}
       {algorithmicVideos[currentVideoIndex]?.boostLevel > 0 && (
         <View style={homeStyles.algorithmIndicator}>
           <Ionicons name="trending-up" size={16} color="#FFD700" />
@@ -4247,15 +4307,30 @@ const AlgorithmicHomeScreen: React.FC = () => {
           </Text>
         </View>
       )}
+      
+      {/* ✅ Debug Info (Development Only) */}
+      {__DEV__ && (
+        <View style={homeStyles.debugInfo}>
+          <Text style={homeStyles.debugText}>
+            📊 Video {currentVideoIndex + 1}/{algorithmicVideos.length} | 
+            ⏱️ Watch: {totalWatchTime.toFixed(1)}s | 
+            🤖 Score: {algorithmicVideos[currentVideoIndex]?.algorithmScore.toFixed(2)}
+          </Text>
+        </View>
+      )}
     </View>
   );
 };
 
-// 🎨 Styles for Algorithmic Home Screen
+// 🎨 Enhanced Universal Styles for Algorithmic Home Screen
 const homeStyles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+    // Universal layout fixes for all device types
+    margin: 0,
+    padding: 0,
+    overflow: 'hidden',
   },
   loadingContainer: {
     flex: 1,

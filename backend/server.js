@@ -104,7 +104,8 @@ app.post('/upload/signed-url', async (req, res) => {
       version: 'v4',
       action: 'write',
       expires: uploadExpiry,
-      contentType: contentType || 'video/mp4'
+      contentType: contentType || 'video/mp4',
+      extensionHeaders: {},
     });
     
     // Return PUBLIC URL that NEVER expires

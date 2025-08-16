@@ -9,18 +9,20 @@ import {
   Dimensions,
   Image,
   Modal,
+  RefreshControl,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AnalyticsDashboard from '../../components/AnalyticsDashboard';
 import CustomThumbnailPicker from '../../components/CustomThumbnailPicker';
 import EnhancedVideoGrid from '../../components/EnhancedVideoGrid';
 import { GlintUploadModal, UploadProgress } from '../../components/GlintUploadModal';
 import SavedVideosGrid from '../../components/SavedVideosGrid';
+import TrendsFeed from '../../components/TrendsFeed';
 import VideoSelectionModal from '../../components/VideoSelectionModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { auth, db } from '../../firebaseConfig';
@@ -60,13 +62,12 @@ function MyProfileScreen() {
   const [followers, setFollowers] = useState(0);
   const [following, setFollowing] = useState(0);
   const [isPrivate, setIsPrivate] = useState(false);
-  const [activeTab, setActiveTab] = useState<'Glints' | 'Picks' | 'Analytics' | 'Saved'>('Glints');
+  const [activeTab, setActiveTab] = useState<'Glints' | 'Trends' | 'Saved'>('Glints');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showVideoSelection, setShowVideoSelection] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [videoRefreshTrigger, setVideoRefreshTrigger] = useState(0);
   const [currentUploadProgress, setCurrentUploadProgress] = useState<UploadProgress>({
     progress: 0,
     stage: 'compressing',
@@ -77,11 +78,81 @@ function MyProfileScreen() {
   const [selectedThumbnail, setSelectedThumbnail] = useState<string | null>(null);
   const [videoCaption, setVideoCaption] = useState('');
   const [processingVideo, setProcessingVideo] = useState(false);
-  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     console.log('☁️ Google Cloud Storage video upload system enabled');
   }, []);
+
+  // Refresh function to reload all profile data
+  const onRefresh = async () => {
+    if (!user || !profileUserId || !currentUserId) return;
+    
+    setRefreshing(true);
+    console.log('🔄 Refreshing profile data...');
+    
+    try {
+      const targetUserId = profileUserId;
+      
+      // Fetch the target user's profile
+      const userDoc = await getDoc(doc(db, 'users', targetUserId));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+
+        const avatarUrl = data.photo || 'https://via.placeholder.com/150';
+        const usernameValue = data.username || 'glint_user';
+        const bioValue = data.bio || 'Welcome to Glint ✨';
+
+        setUsername(usernameValue);
+        setBio(bioValue);
+        setAvatar(avatarUrl);
+        setIsPrivate(data.private || false);
+
+        // Get real-time follow stats
+        if (targetUserId) {
+          try {
+            const stats = await followService.getUserFollowStats(targetUserId, currentUserId);
+            setFollowers(stats.followersCount);
+            setFollowing(stats.followingCount);
+            console.log('📊 Refreshed follow stats:', stats);
+          } catch (error) {
+            console.error('❌ Error refreshing follow stats:', error);
+            setFollowers(data.followers || 0);
+            setFollowing(data.following || 0);
+          }
+        }
+
+        // Count user's videos for accurate glint count
+        const videosQuery = query(
+          collection(db, 'videos'),
+          where('userId', '==', targetUserId)
+        );
+        const videosSnapshot = await getDocs(videosQuery);
+        setGlints(videosSnapshot.size);
+
+        // Update global state if viewing own profile
+        if (isOwnProfile) {
+          const { setAvatar: setGlobalAvatar, setUsername: setGlobalUsername, setBio: setGlobalBio } =
+            useUserStore.getState();
+
+          setGlobalUsername(usernameValue);
+          setGlobalBio(bioValue);
+          setGlobalAvatar(avatarUrl);
+        }
+      }
+
+      // Trigger video grid refresh
+      setRefreshKey(prev => prev + 1);
+      
+      console.log('✅ Profile refresh completed');
+      
+    } catch (error) {
+      console.error('❌ Error refreshing profile:', error);
+      Alert.alert('Refresh Failed', 'Failed to refresh profile data. Please try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // Fetch profile data and update states
   useEffect(() => {
@@ -186,6 +257,9 @@ function MyProfileScreen() {
   // Enhanced video picker with Glint-style upload
   const pickVideo = async () => {
     if (uploading) return; // Prevent multiple uploads
+    
+    // Store the current active tab to determine upload context
+    console.log(`📤 Starting upload for ${activeTab} tab`);
     setShowVideoSelection(true);
   };
 
@@ -293,55 +367,11 @@ function MyProfileScreen() {
     }
   };
 
-  const selectFromGallery = async () => {
-    try {
-      console.log('📱 Requesting media library permission...');
-      
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      console.log('📊 Permission status:', permissionResult.status);
-
-      if (permissionResult.status !== 'granted') {
-        Alert.alert('Permission required', 'Permission to access media library is required!');
-        return;
-      }
-
-      console.log('🎬 Opening video picker...');
-
-      const pickerResult = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        allowsEditing: false,
-        quality: 1,
-        videoMaxDuration: 60,
-        videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality,
-      });
-
-      if (pickerResult.canceled) {
-        console.log('Video selection was cancelled.');
-        return;
-      }
-
-      const videoUri = pickerResult.assets[0].uri;
-      console.log('✅ Video selected:', videoUri);
-      
-      setProcessingVideo(true);
-      setShowVideoSelection(false);
-      
-      setTimeout(() => {
-        setPendingVideoUri(videoUri);
-        setProcessingVideo(false);
-        setShowThumbnailSelector(true);
-      }, 1000);
-    } catch (error) {
-      console.error('Error picking video:', error);
-      Alert.alert('Error', 'Failed to pick video.');
-      setProcessingVideo(false);
-    }
-  };
-
   // Google Cloud Storage upload function using Railway backend
   const uploadVideoToMux = async (videoUri: string, editParams?: any) => {
     const uploadId = `gcs_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     console.log('☁️ Google Cloud Storage upload started with ID:', uploadId);
+    console.log(`📂 Uploading for ${activeTab} tab`);
     
     try {
       setShowUploadModal(true);
@@ -406,6 +436,19 @@ function MyProfileScreen() {
 
       console.log('✅ Video uploaded to Google Cloud Storage successfully');
 
+      // Verify the uploaded video is accessible
+      try {
+        const testResponse = await fetch(videoUrl, { method: 'HEAD' });
+        if (testResponse.status === 403) {
+          console.warn('⚠️ Video URL returned 403 - bucket permissions may need adjustment');
+          console.warn('🔧 Please ensure your GCS bucket has public read permissions');
+        } else if (testResponse.ok) {
+          console.log('✅ Video URL is accessible:', testResponse.status);
+        }
+      } catch (error: any) {
+        console.warn('⚠️ Could not verify video URL accessibility:', error?.message || error);
+      }
+
       setCurrentUploadProgress({
         progress: 70,
         stage: 'processing',
@@ -456,7 +499,19 @@ function MyProfileScreen() {
         message: 'Saving video metadata...'
       });
 
+      // Determine content type based on active tab
+      const contentType = activeTab === 'Trends' ? 'trending' : 'glint';
+      const collections = activeTab === 'Trends' ? ['videos', 'posts', 'trends'] : ['videos', 'posts'];
+
+      console.log(`📤 Upload Context:`, {
+        activeTab,
+        contentType,
+        collections,
+        uploadId
+      });
+
       // Create video document with Google Cloud Storage data
+      // Note: Ensure your GCS bucket has public read permissions
       const videoDoc = {
         userId: currentUser.uid,
         id: uploadId,
@@ -475,9 +530,20 @@ function MyProfileScreen() {
         isRealVideo: true,
         uploadedAt: new Date().toISOString(),
         bucketName: 'glint-videos',
+        accessType: 'public', // Added to track access type
+        uploadMethod: 'signed-url', // Track upload method
+        contentType: contentType, // Track if it's for Glints or Trends
+        uploadTab: activeTab, // Track which tab it was uploaded from
       };
 
-      // Save to Firebase
+      console.log(`💾 Video Document:`, {
+        id: videoDoc.id,
+        uploadTab: videoDoc.uploadTab,
+        contentType: videoDoc.contentType,
+        userId: videoDoc.userId
+      });
+
+      // Save to Firebase in appropriate collections
       await setDoc(doc(db, 'videos', uploadId), videoDoc);
       console.log('✅ Video saved to Firebase:', uploadId);
 
@@ -497,40 +563,72 @@ function MyProfileScreen() {
         processed: true,
         status: 'ready',
         storage: 'google-cloud',
+        contentType: contentType,
+        uploadTab: activeTab,
       };
 
       await setDoc(doc(db, 'posts', uploadId), postDoc);
       console.log('✅ Post saved:', uploadId);
 
+      // If uploaded for Trends tab, also save to trends collection
+      if (activeTab === 'Trends') {
+        const trendDoc = {
+          ...videoDoc,
+          trendingScore: 0,
+          trendingDate: new Date().toISOString(),
+          category: 'user-generated',
+        };
+        
+        await setDoc(doc(db, 'trends', uploadId), trendDoc);
+        console.log('✅ Trend saved:', uploadId);
+        console.log('🔥 Video uploaded to Trends - should NOT appear in Glints tab');
+      } else {
+        console.log('💎 Video uploaded to Glints - should appear in Glints tab');
+      }
+
       setCurrentUploadProgress({
         progress: 100,
         stage: 'complete',
-        message: 'Video uploaded successfully!'
+        message: `Video uploaded successfully to ${activeTab}!`
       });
 
       // Refresh video grid
-      setVideoRefreshTrigger(prev => prev + 1);
       setRefreshKey(prev => prev + 1);
       
-      // Update user's video count
-      if (auth.currentUser) {
+      // Force refresh of the current tab to ensure proper filtering
+      console.log(`🔄 Forcing refresh for ${activeTab} tab with new video`);
+      
+      // Add a slight delay to ensure Firebase write is complete
+      setTimeout(() => {
+        setRefreshKey(prev => prev + 1);
+        console.log(`🔄 Secondary refresh triggered for ${activeTab} tab`);
+      }, 1000);
+      
+      // Update user's video count - ONLY for Glints uploads, not Trends
+      if (auth.currentUser && activeTab === 'Glints') {
         try {
           await updateDoc(doc(db, 'users', auth.currentUser.uid), {
             glints: increment(1)
           });
           setGlints(prev => prev + 1);
+          console.log('✅ Glints count incremented for Glints upload');
         } catch (error) {
           console.warn('⚠️ Failed to update user glint count:', error);
           setGlints(prev => prev + 1);
         }
+      } else if (activeTab === 'Trends') {
+        console.log('🔥 Trends upload - Glints count NOT incremented (correct behavior)');
       }
       
       setTimeout(() => {
         setShowUploadModal(false);
-        Alert.alert('🎉 Upload Complete!', 'Your video has been uploaded to Google Cloud Storage successfully!');
+        Alert.alert(
+          `🎉 Upload Complete!`, 
+          `Your video has been uploaded to ${activeTab} successfully! Check it out in the ${activeTab} tab.`
+        );
       }, 1000);
       
-      console.log('☁️ Google Cloud Storage upload completed successfully');
+      console.log(`☁️ Google Cloud Storage upload completed successfully for ${activeTab}`);
       
     } catch (error: any) {
       console.error('❌ Google Cloud Storage upload failed:', error);
@@ -651,10 +749,8 @@ function MyProfileScreen() {
           )}
         </View>
 
-        {/* Test button removed */}
-
         <View style={styles.tabs}>
-          {['Glints', 'Picks', 'Analytics', 'Saved'].map((tab) => (
+          {['Glints', 'Trends', 'Saved'].map((tab) => (
             <TouchableOpacity
               key={tab}
               style={[styles.tab, activeTab === tab && styles.activeTab]}
@@ -674,9 +770,9 @@ function MyProfileScreen() {
         <View style={styles.contentContainer}>
           {activeTab === 'Glints' && profileUserId && (
             <EnhancedVideoGrid 
-              key={`${refreshKey}-${videoRefreshTrigger}`} 
-              refreshTrigger={videoRefreshTrigger}
+              key={refreshKey} 
               userId={profileUserId}
+              contentFilter="glint"
             />
           )}
 
@@ -687,53 +783,15 @@ function MyProfileScreen() {
             </View>
           )}
 
-          {activeTab === 'Picks' && (
-            <View style={styles.centeredBox}>
-              <Text style={styles.placeholderText}>Coming Soon 🤝</Text>
-            </View>
-          )}
-
-          {activeTab === 'Analytics' && isOwnProfile && (
-            <>
-              {followers >= 10000 ? (
-                <TouchableOpacity 
-                  style={styles.analyticsButton}
-                  onPress={() => setShowAnalytics(true)}
-                >
-                  <View style={styles.analyticsContent}>
-                    <Ionicons name="analytics" size={32} color="#007AFF" />
-                    <Text style={styles.analyticsTitle}>View Analytics</Text>
-                    <Text style={styles.analyticsSubtitle}>
-                      See detailed view tracking, watch time, and audience insights
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ) : (
-                <View style={styles.centeredBox}>
-                  <View style={styles.analyticsContent}>
-                    <Ionicons name="lock-closed" size={32} color="#888888" />
-                    <Text style={styles.analyticsTitle}>Analytics Locked</Text>
-                    <Text style={styles.analyticsSubtitle}>
-                      You will unlock when you reach 10,000 followers 👊
-                    </Text>
-                    <Text style={styles.followerCountText}>
-                      {followers.toLocaleString()} / 10,000 followers
-                    </Text>
-                  </View>
-                </View>
-              )}
-            </>
-          )}
-
-          {activeTab === 'Analytics' && !isOwnProfile && (
-            <View style={styles.centeredBox}>
-              <Text style={styles.placeholderText}>Analytics are private.</Text>
-            </View>
+          {activeTab === 'Trends' && (
+            <TrendsFeed 
+              refreshKey={refreshKey}
+            />
           )}
 
           {activeTab === 'Saved' && (
             <SavedVideosGrid 
-              refreshTrigger={refreshKey}
+              key={refreshKey}
             />
           )}
         </View>
@@ -754,7 +812,7 @@ function MyProfileScreen() {
           visible={showVideoSelection}
           onClose={() => setShowVideoSelection(false)}
           onRecordVideo={recordVideo}
-          onSelectFromGallery={selectFromGallery}
+          uploadContext={activeTab}
         />
       ) : null}
 
@@ -827,21 +885,6 @@ function MyProfileScreen() {
               </View>
             </View>
           </SafeAreaView>
-        </Modal>
-      ) : null}
-      
-      {/* Analytics Modal */}
-      {isOwnProfile ? (
-        <Modal
-          visible={showAnalytics}
-          animationType="slide"
-          presentationStyle="pageSheet"
-        >
-          <AnalyticsDashboard
-            userId={profileUserId}
-            visible={showAnalytics}
-            onClose={() => setShowAnalytics(false)}
-          />
         </Modal>
       ) : null}
     </SafeAreaView>
@@ -1042,39 +1085,6 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 14,
     fontWeight: '500',
-  },
-  
-  // Analytics Button Styles
-  analyticsButton: {
-    margin: 16,
-    padding: 20,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  analyticsContent: {
-    alignItems: 'center',
-  },
-  analyticsTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#000',
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  analyticsSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  followerCountText: {
-    fontSize: 12,
-    color: '#007AFF',
-    textAlign: 'center',
-    marginTop: 8,
-    fontWeight: '600',
   },
 });
 

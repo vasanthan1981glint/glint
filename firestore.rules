@@ -30,6 +30,17 @@ service cloud.firestore {
       }
     }
     
+    // Trends collection for trending content
+    match /trends/{trendId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+      
+      // Trend likes subcollection
+      match /likes/{userId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+    
     // Users collection
     match /users/{userId} {
       allow read: if true;
@@ -181,6 +192,62 @@ service cloud.firestore {
     match /videoAnalytics/{videoId} {
       allow read: if true; // Analytics can be read by anyone
       allow write: if true; // Allow system to update analytics
+    }
+
+    // Video engagements collection (for tracking user interactions)
+    match /videoEngagements/{engagementId} {
+      allow read: if true; // Analytics can be read by anyone
+      allow create: if request.auth != null; // Only authenticated users can create engagements
+      allow update: if request.auth != null; // Only authenticated users can update engagements
+      allow delete: if request.auth != null; // Only authenticated users can delete engagements
+    }
+
+    // Enhanced engagement tracking collections
+    match /engagementEvents/{eventId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // User sessions for behavior tracking
+    match /userSessions/{sessionId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // User signals for algorithm learning
+    match /userSignals/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Real-time video metrics
+    match /realTimeVideoMetrics/{videoId} {
+      allow read: if true; // Analytics can be read by anyone
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
+
+    // Content signatures for AI matching
+    match /contentSignatures/{videoId} {
+      allow read: if true; // Content analysis can be read by anyone
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
+
+    // A/B testing configurations
+    match /abTestConfigs/{testId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if request.auth != null;
     }
 
     // User counters collection (for profile stats)

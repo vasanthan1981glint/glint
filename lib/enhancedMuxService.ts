@@ -29,8 +29,8 @@ export interface VideoAsset {
 }
 
 class EnhancedMuxService {
-  private apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://truthful-upliftment-production.up.railway.app';
-  private googleCloudUrl = 'https://truthful-upliftment-production.up.railway.app'; // Your new Google Cloud backend
+  private apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://glint-production-f754.up.railway.app';
+  private googleCloudUrl = 'https://glint-production-f754.up.railway.app'; // Your new Google Cloud backend
 
   // Check if Google Cloud backend is available
   async checkGoogleCloudHealth(): Promise<boolean> {
@@ -241,7 +241,7 @@ class EnhancedMuxService {
 
       // Step 3: Wait for processing and get asset info
       let asset;
-can       let attempts = 0;
+      let attempts = 0;
       const maxAttempts = 600; // 10 minutes max wait - doubled timeout for longer videos
       let pollInterval = 2000; // Start with 2 second intervals
       let consecutiveErrors = 0;

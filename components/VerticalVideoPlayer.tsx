@@ -152,7 +152,9 @@ const getResponsiveSize = () => {
 
 interface VideoData {
   assetId: string;
+  videoId?: string; // Google Cloud uses videoId
   playbackUrl: string;
+  streamingUrl?: string; // Google Cloud uses streamingUrl
   thumbnailUrl: string;
   username: string;
   userId: string;
@@ -694,7 +696,7 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
             try {
               // Generate real thumbnail from video at 2 seconds
               const generatedThumbnail = await thumbnailService.generateAndUploadThumbnail(
-                video.playbackUrl,
+                video.streamingUrl || video.playbackUrl,
                 video.assetId,
                 { time: 2000, quality: 0.9 } // High quality thumbnail at 2 seconds
               );
@@ -735,7 +737,7 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
           try {
             // Generate real thumbnail from video at 2 seconds
             const generatedThumbnail = await thumbnailService.generateAndUploadThumbnail(
-              video.playbackUrl,
+              video.streamingUrl || video.playbackUrl,
               video.assetId,
               { time: 2000, quality: 0.9 } // High quality thumbnail at 2 seconds
             );
@@ -2033,7 +2035,7 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
     }
     
     // Select optimal video URL based on available variants and network quality
-    let videoUrl = item.playbackUrl;
+    let videoUrl = item.streamingUrl || item.playbackUrl; // Prefer Google Cloud streamingUrl
     if (metadata?.variants && metadata.variants.length > 0) {
       const optimalUrl = selectOptimalVideoQuality(metadata.variants, networkQuality);
       if (optimalUrl) {
@@ -2240,6 +2242,16 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
               onError={(error) => {
                 console.error(`💥 Video playback error for ${item.assetId}:`, error);
                 
+                // Check if this is a legacy Mux video with -1008 error
+                const isMuxVideo = (item.streamingUrl || item.playbackUrl)?.includes('stream.mux.com');
+                const isNetworkError = error.toString().includes('-1008') || error.toString().includes('NSURLErrorResourceUnavailable');
+                
+                if (isMuxVideo && isNetworkError) {
+                  console.warn(`⚠️ Legacy Mux video ${item.assetId} failed to load - this is expected for old videos`);
+                  // Mark as loading false to prevent reload attempts
+                  setVideoLoading(prev => ({ ...prev, [item.assetId]: false }));
+                }
+                
                 // Show thumbnail on video error
                 setShowThumbnails(prev => ({ ...prev, [item.assetId]: true }));
                 
@@ -2286,7 +2298,7 @@ export const VerticalVideoPlayer: React.FC<VerticalVideoPlayerProps> = ({
                         try {
                           console.log('🔄 Regenerating thumbnail for video:', item.assetId);
                           const newThumbnail = await thumbnailService.generateAndUploadThumbnail(
-                            item.playbackUrl,
+                            item.streamingUrl || item.playbackUrl,
                             item.assetId,
                             { time: 2000, quality: 0.9 }
                           );

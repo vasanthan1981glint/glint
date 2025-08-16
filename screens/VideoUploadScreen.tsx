@@ -161,7 +161,7 @@ export default function VideoUploadScreen({ onUploadComplete }: VideoUploadScree
     setUploadStage('Preparing upload...');
 
     try {
-      console.log('🚀 Starting Mux upload...');
+      console.log('🚀 Starting Google Cloud upload...');
 
       // Use the background upload service for better UX
       const uploadId = await backgroundUploadService.startBackgroundUpload(

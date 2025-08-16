@@ -25,7 +25,7 @@ import LocalThumbnailService, { GeneratedThumbnail } from '../../lib/localThumbn
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 export default function CaptionScreen() {
-  const { videoUri } = useLocalSearchParams();
+  const { videoUri, context, uploadTab } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -33,6 +33,9 @@ export default function CaptionScreen() {
   
   // Get custom thumbnail from URL params if available
   const customThumbnail = useLocalSearchParams().customThumbnail as string;
+  
+  // Upload context from profile tab (Glints, Trends, Saved) or from upload screen
+  const uploadContext = (uploadTab || context) as string;
   
   // Video state
   const [caption, setCaption] = useState('');
@@ -179,11 +182,12 @@ export default function CaptionScreen() {
 
     try {
       console.log('🚀 CAPTION SCREEN: Starting YouTube-style background upload...');
-      console.log('� Video URI:', videoUri);
+      console.log('📱 Video URI:', videoUri);
       console.log('👤 User ID:', user?.uid);
       console.log('📝 Caption:', caption || 'My Video');
-      console.log('�📸 Selected thumbnail:', selectedThumbnail);
+      console.log('📸 Selected thumbnail:', selectedThumbnail);
       console.log('🎯 Custom thumbnail URI:', selectedThumbnail?.isCustom ? selectedThumbnail.uri : 'none');
+      console.log('📂 Upload context:', uploadContext || 'default');
       
       // Import and start background upload service
       console.log('📦 Importing background upload service...');
@@ -195,16 +199,18 @@ export default function CaptionScreen() {
       const uploadId = await backgroundUploadService.startBackgroundUpload(
         decodeURIComponent(videoUri as string),
         caption || 'My Video',
-        selectedThumbnail?.isCustom ? selectedThumbnail.uri : undefined
+        selectedThumbnail?.isCustom ? selectedThumbnail.uri : undefined,
+        uploadContext as 'Glints' | 'Trends'
       );
 
       console.log('✅ CAPTION SCREEN: Background upload started successfully:', uploadId);
       console.log('🎯 Upload ID generated:', uploadId);
       
-      // Show immediate success feedback
+      // Show immediate success feedback with context
+      const contextMessage = uploadContext ? ` to ${uploadContext}` : '';
       Alert.alert(
         '🎉 Upload Started!', 
-        'Your video is uploading in the background. You can continue using the app!',
+        `Your video is uploading${contextMessage} in the background. You can continue using the app!`,
         [{ text: 'Great!', style: 'default' }]
       );
       
@@ -258,7 +264,14 @@ export default function CaptionScreen() {
           <TouchableOpacity onPress={handleBack} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#000" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Add Caption</Text>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>Add Caption</Text>
+            {uploadContext && (
+              <Text style={styles.uploadContext}>
+                Uploading to {uploadContext}
+              </Text>
+            )}
+          </View>
           <TouchableOpacity 
             onPress={handlePost}
             style={[styles.postButton, uploading && styles.postButtonDisabled]}
@@ -704,5 +717,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  uploadContext: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
+    marginTop: 2,
   },
 });

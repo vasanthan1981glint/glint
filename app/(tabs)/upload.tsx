@@ -6,19 +6,19 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  Dimensions,
-  Modal,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Alert,
+    Animated,
+    Dimensions,
+    Modal,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import TemplateEditor from '../../components/TemplateEditor';
+// import TemplateEditor from '../../components/TemplateEditor';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -150,6 +150,35 @@ export default function PlusScreen() {
     }
   };
 
+  const handleTrendsUpload = async () => {
+    try {
+      console.log('🔥 Opening gallery for Trends upload...');
+      
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permissionResult.status !== 'granted') {
+        Alert.alert('Permission Required', 'Photo library permission is required!');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: Platform.OS === 'ios',
+        quality: 1,
+        videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        const videoUri = result.assets[0].uri;
+        console.log('✅ Video selected for Trends:', videoUri);
+        // Navigate to caption screen with uploadTab context
+        router.push(`/caption/${encodeURIComponent(videoUri)}?uploadTab=Trends`);
+      }
+    } catch (error) {
+      console.error('❌ Error selecting video for Trends:', error);
+      Alert.alert('Selection Error', 'Failed to select video. Please try again.');
+    }
+  };
+
   const handleRemixGreenScreen = () => {
     Alert.alert(
       'Remix & Green Screen',
@@ -179,37 +208,54 @@ export default function PlusScreen() {
 
   const VideoCreationOptions = () => (
     <View style={styles.optionsContainer}>
-      {/* Record Now */}
-      <TouchableOpacity style={styles.mainOption} onPress={handleVideoRecording}>
+      {/* Trends Upload - Large 50% Button */}
+      <TouchableOpacity style={styles.trendsOption} onPress={handleTrendsUpload}>
         <LinearGradient
-          colors={['#FF6B6B', '#FF8E8E']}
-          style={styles.optionGradient}
+          colors={['#FF4500', '#FF6B35', '#FF8E53']}
+          style={styles.trendsGradient}
         >
-          <View style={styles.recordButton}>
-            <View style={styles.recordInner} />
+          <View style={styles.trendsContent}>
+            <View style={styles.trendingIcon}>
+              <Ionicons name="trending-up" size={48} color="#fff" />
+            </View>
+            <Text style={styles.trendsTitle}>Upload to Trends</Text>
+            <Text style={styles.trendsSubtitle}>Share what's hot right now</Text>
+            <View style={styles.trendsFeatures}>
+              <View style={styles.trendsFeature}>
+                <Ionicons name="flame" size={16} color="#fff" />
+                <Text style={styles.trendsFeatureText}>Get discovered</Text>
+              </View>
+              <View style={styles.trendsFeature}>
+                <Ionicons name="eye" size={16} color="#fff" />
+                <Text style={styles.trendsFeatureText}>More visibility</Text>
+              </View>
+            </View>
           </View>
-          <Text style={styles.optionTitle}>Record Now</Text>
-          <Text style={styles.optionSubtitle}>Camera preview with controls</Text>
         </LinearGradient>
       </TouchableOpacity>
 
-      {/* Upload From Device */}
-      <TouchableOpacity style={styles.option} onPress={handleGalleryUpload}>
-        <View style={styles.optionContent}>
-          <Ionicons name="cloud-upload" size={32} color="#4ECDC4" />
-          <Text style={styles.optionTitle}>Upload From Device</Text>
-          <Text style={styles.optionSubtitle}>Select from gallery</Text>
-        </View>
-      </TouchableOpacity>
+      {/* Regular Options Container */}
+      <View style={styles.regularOptions}>
+        {/* Record Now */}
+        <TouchableOpacity style={styles.option} onPress={handleVideoRecording}>
+          <View style={styles.optionContent}>
+            <View style={styles.recordButton}>
+              <View style={styles.recordInner} />
+            </View>
+            <Text style={styles.optionTitle}>Record Now</Text>
+            <Text style={styles.optionSubtitle}>Camera preview with controls</Text>
+          </View>
+        </TouchableOpacity>
 
-      {/* Remix / Green Screen */}
-      <TouchableOpacity style={styles.option} onPress={handleRemixGreenScreen}>
-        <View style={styles.optionContent}>
-          <Ionicons name="color-filter" size={32} color="#45B7D1" />
-          <Text style={styles.optionTitle}>Remix / Green Screen</Text>
-          <Text style={styles.optionSubtitle}>Use parts of other videos</Text>
-        </View>
-      </TouchableOpacity>
+        {/* Upload From Device */}
+        <TouchableOpacity style={styles.option} onPress={handleGalleryUpload}>
+          <View style={styles.optionContent}>
+            <Ionicons name="cloud-upload" size={32} color="#4ECDC4" />
+            <Text style={styles.optionTitle}>Upload From Device</Text>
+            <Text style={styles.optionSubtitle}>Select from gallery</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -368,7 +414,7 @@ export default function PlusScreen() {
       </Modal>
 
       {/* Template Editor */}
-      <TemplateEditor
+      {/* <TemplateEditor
         visible={showTemplateEditor}
         template={selectedTemplate}
         onClose={() => {
@@ -376,7 +422,7 @@ export default function PlusScreen() {
           setSelectedTemplate(null);
         }}
         onComplete={handleTemplateComplete}
-      />
+      /> */}
     </SafeAreaView>
   );
 }
@@ -604,5 +650,63 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  // Trends Upload Styles
+  trendsOption: {
+    height: SCREEN_HEIGHT * 0.5, // 50% of screen height
+    marginBottom: 20,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  trendsGradient: {
+    flex: 1,
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trendsContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trendingIcon: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  trendsTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  trendsSubtitle: {
+    fontSize: 18,
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  trendsFeatures: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 24,
+  },
+  trendsFeature: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  trendsFeatureText: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '600',
+  },
+  regularOptions: {
+    flex: 1,
   },
 });
