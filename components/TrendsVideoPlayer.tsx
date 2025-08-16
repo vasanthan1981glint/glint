@@ -128,13 +128,6 @@ const TrendsVideoPlayer: React.FC<TrendsVideoPlayerProps> = ({ visible, video, o
               <Ionicons name="play" size={60} color="#fff" />
             </TouchableOpacity>
           </View>
-          
-          {/* Video duration badge */}
-          <View style={styles.durationBadge}>
-            <Text style={styles.durationText}>
-              {Math.floor(Math.random() * 10 + 1)}:{String(Math.floor(Math.random() * 60)).padStart(2, '0')}
-            </Text>
-          </View>
         </View>
 
         {/* Video Info Section */}
@@ -307,20 +300,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  durationBadge: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  durationText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
   },
   infoSection: {
     flex: 1,

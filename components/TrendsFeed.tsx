@@ -238,11 +238,6 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
           style={styles.thumbnail}
           resizeMode="cover"
         />
-        <View style={styles.durationBadge}>
-          <Text style={styles.durationText}>
-            {Math.floor(Math.random() * 10 + 1)}:{String(Math.floor(Math.random() * 60)).padStart(2, '0')}
-          </Text>
-        </View>
       </View>
       
       {/* Right side: Video info */}
@@ -384,20 +379,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     backgroundColor: '#f0f0f0',
-  },
-  durationBadge: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderRadius: 3,
-  },
-  durationText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
   },
   // Right side video info
   videoInfo: {

@@ -129,15 +129,6 @@ export default function SavedScreen() {
           <View style={styles.playButtonOverlay}>
             <Ionicons name="play" size={24} color="white" />
           </View>
-          
-          {/* Duration if available */}
-          {item.videoData?.duration && (
-            <View style={styles.durationBadge}>
-              <Text style={styles.durationText}>
-                {formatDuration(item.videoData.duration)}
-              </Text>
-            </View>
-          )}
         </View>
 
         {/* Video Info */}
@@ -345,20 +336,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: -20,
     marginLeft: -20,
-  },
-  durationBadge: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  durationText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
   },
   videoInfo: {
     padding: 12,
