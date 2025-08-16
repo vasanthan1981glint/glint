@@ -9,9 +9,7 @@ import {
   Dimensions,
   Image,
   Modal,
-  RefreshControl,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -23,6 +21,7 @@ import EnhancedVideoGrid from '../../components/EnhancedVideoGrid';
 import { GlintUploadModal, UploadProgress } from '../../components/GlintUploadModal';
 import SavedVideosGrid from '../../components/SavedVideosGrid';
 import TrendsFeed from '../../components/TrendsFeed';
+import TrendsVideoPlayer from '../../components/TrendsVideoPlayer';
 import VideoSelectionModal from '../../components/VideoSelectionModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { auth, db } from '../../firebaseConfig';
@@ -79,6 +78,10 @@ function MyProfileScreen() {
   const [videoCaption, setVideoCaption] = useState('');
   const [processingVideo, setProcessingVideo] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Video player state
+  const [selectedVideo, setSelectedVideo] = useState<any>(null);
+  const [playerVisible, setPlayerVisible] = useState(false);
 
   useEffect(() => {
     console.log('☁️ Google Cloud Storage video upload system enabled');
@@ -276,6 +279,17 @@ function MyProfileScreen() {
       console.error('❌ Error in follow toggle:', error);
       Alert.alert('Error', 'Failed to update follow status. Please try again.');
     }
+  };
+
+  // Video player handlers
+  const handleVideoPress = (video: any) => {
+    setSelectedVideo(video);
+    setPlayerVisible(true);
+  };
+
+  const handleClosePlayer = () => {
+    setPlayerVisible(false);
+    setSelectedVideo(null);
   };
 
   // Enhanced video picker with Glint-style upload
@@ -797,6 +811,7 @@ function MyProfileScreen() {
               key={refreshKey} 
               userId={profileUserId}
               contentFilter="glint"
+              onVideoPress={handleVideoPress}
             />
           )}
 
@@ -911,6 +926,15 @@ function MyProfileScreen() {
           </SafeAreaView>
         </Modal>
       ) : null}
+
+      {/* Video Player Modal */}
+      {selectedVideo && (
+        <TrendsVideoPlayer
+          visible={playerVisible}
+          video={selectedVideo}
+          onClose={handleClosePlayer}
+        />
+      )}
     </SafeAreaView>
   );
 }

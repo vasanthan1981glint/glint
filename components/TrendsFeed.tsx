@@ -3,18 +3,20 @@ import { useRouter } from 'expo-router';
 import { collection, getDocs, limit, orderBy, query, startAfter } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Dimensions,
-    FlatList,
-    Image,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Dimensions,
+  FlatList,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
+import { feedDeduplicationService } from '../lib/feedDeduplicationService';
+import { videoResolutionService } from '../lib/videoResolutionService';
 import { formatCount } from '../utils/formatUtils';
 import TrendsVideoPlayer from './TrendsVideoPlayer';
 
@@ -62,6 +64,7 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
         setRefreshing(true);
         setLastDoc(null);
         setHasMore(true);
+        feedDeduplicationService.reset(); // Reset on refresh
       } else {
         setLoading(true);
       }
@@ -135,8 +138,37 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
         }
       });
 
+      // ✅ Apply memory management and performance fixes
+      
+      // 1. Remove duplicates to prevent infinite loading
+      const uniqueVideos = feedDeduplicationService.removeDuplicates(newVideos);
+      
+      // 2. Check for duplicate loading
+      const videoIds = uniqueVideos.map(v => v.id);
+      const isDuplicate = feedDeduplicationService.isDuplicateLoad(videoIds, isRefresh ? 'refresh' : 'pagination');
+      
+      if (isDuplicate && !isRefresh) {
+        console.log('🚫 Duplicate load detected, skipping');
+        setLoading(false);
+        setLoadingMore(false);
+        return;
+      }
+      
+      // 3. Filter out 4K and unsupported videos to prevent crashes
+      const supportedVideos = videoResolutionService.filterSupportedVideos(uniqueVideos);
+      
+      // 4. Check memory limits
+      const canLoadMore = videoResolutionService.canLoadMoreVideos(videos.length + supportedVideos.length);
+      if (!canLoadMore && !isRefresh) {
+        console.log('🧠 Memory limit reached, stopping video loading');
+        setHasMore(false);
+        setLoading(false);
+        setLoadingMore(false);
+        return;
+      }
+
       // Sort to prioritize Trends uploads at the top
-      newVideos.sort((a, b) => {
+      supportedVideos.sort((a, b) => {
         const aIsTrending = a.uploadTab === 'Trends';
         const bIsTrending = b.uploadTab === 'Trends';
         
@@ -147,15 +179,18 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
 
-      console.log(`🔥 Loaded ${newVideos.length} trending videos (current user's videos only)`);
-      console.log(`📈 ${newVideos.filter(v => v.uploadTab === 'Trends').length} videos uploaded to Trends by current user`);
-      console.log(`🎬 ${newVideos.filter(v => v.uploadTab !== 'Trends').length} other videos by current user`);
+      console.log(`🔥 Loaded ${supportedVideos.length} trending videos (filtered from ${newVideos.length})`);
+      console.log(`📈 ${supportedVideos.filter(v => v.uploadTab === 'Trends').length} videos uploaded to Trends by current user`);
+      console.log(`🎬 ${supportedVideos.filter(v => v.uploadTab !== 'Trends').length} other videos by current user`);
+
+      // Mark videos as loaded to prevent duplicates
+      feedDeduplicationService.markVideosLoaded(videoIds, isRefresh ? 'refresh' : 'pagination');
 
       // Update state
       if (isRefresh) {
-        setVideos(newVideos);
+        setVideos(supportedVideos);
       } else {
-        setVideos(prev => [...prev, ...newVideos]);
+        setVideos(prev => [...prev, ...supportedVideos]);
       }
 
       // Set last document for pagination
@@ -164,7 +199,7 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
       }
 
       // Check if there are more videos
-      setHasMore(snapshot.docs.length === VIDEOS_PER_PAGE);
+      setHasMore(snapshot.docs.length === VIDEOS_PER_PAGE && supportedVideos.length > 0);
 
     } catch (error) {
       console.error('❌ Error loading trending videos:', error);
@@ -173,7 +208,7 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
       setRefreshing(false);
       setLoadingMore(false);
     }
-  }, [lastDoc]);
+  }, [lastDoc, user?.uid, videos.length]);
 
   // Load more videos when reaching the end
   const loadMoreVideos = useCallback(async () => {
@@ -192,6 +227,17 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
   useEffect(() => {
     loadVideos(true);
   }, [refreshKey]);
+
+  // ✅ Cleanup effect to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      // Cleanup when component unmounts
+      console.log('🧹 TrendsFeed cleanup: clearing video references');
+      setVideos([]);
+      setSelectedVideo(null);
+      setPlayerVisible(false);
+    };
+  }, []);
 
   // Navigate to video player
   const handleVideoPress = (video: Video) => {
@@ -330,6 +376,17 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
         ListFooterComponent={renderFooter}
         ListEmptyComponent={renderEmpty}
         contentContainerStyle={videos.length === 0 ? styles.emptyContainer : styles.listContainer}
+        // ✅ Performance optimizations
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={10}
+        initialNumToRender={5}
+        updateCellsBatchingPeriod={50}
+        getItemLayout={(data, index) => ({
+          length: 120, // Approximate item height
+          offset: 120 * index,
+          index,
+        })}
       />
       
       {/* Trends Video Player Modal */}

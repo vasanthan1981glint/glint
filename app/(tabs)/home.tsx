@@ -45,14 +45,17 @@ import { db } from '../../firebaseConfig';
 import { useViewTracking } from '../../hooks/useViewTracking';
 import { algorithmicFeedService } from '../../lib/algorithmicFeedService';
 import { engagementTrackingService } from '../../lib/engagementTrackingService';
+import { feedDeduplicationService } from '../../lib/feedDeduplicationService';
 import { followService } from '../../lib/followService';
 import { useFollowStore } from '../../lib/followStore';
+import { memoryManagementService } from '../../lib/memoryManagementService';
 import { savedVideosService } from '../../lib/savedVideosService';
 import thumbnailService from '../../lib/thumbnailService';
 import { UserProfile, UserProfileService } from '../../lib/userProfileService';
 import { useUserStore } from '../../lib/userStore';
 import { videoDeleteService } from '../../lib/videoDeleteService';
 import { ProcessedVideoVariant } from '../../lib/videoProcessingPipeline';
+import { videoResolutionService } from '../../lib/videoResolutionService';
 import { viewTracker } from '../../lib/viewTrackingService';
 
 import VideoOptionsModal from '../../components/VideoOptionsModal';
@@ -3980,7 +3983,33 @@ const AlgorithmicHomeScreen: React.FC = () => {
         setAlgorithmicVideos(basicVideos);
       } else {
         console.log(`✅ Loaded ${feedVideos.length} algorithmic videos`);
-        const enhancedVideos: AlgorithmicVideoData[] = feedVideos.map((video: any) => ({
+        
+        // ✅ Apply memory management and performance fixes
+        
+        // 1. Remove duplicates to prevent infinite loading
+        const uniqueVideos = feedDeduplicationService.removeDuplicates(feedVideos);
+        
+        // 2. Check for duplicate loading
+        const videoIds = uniqueVideos.map(v => v.id || v.assetId);
+        const isDuplicate = feedDeduplicationService.isDuplicateLoad(videoIds, 'algorithmic');
+        
+        if (isDuplicate) {
+          console.log('🚫 Duplicate algorithmic feed detected, skipping');
+          setIsLoadingFeed(false);
+          return;
+        }
+        
+        // 3. Filter out 4K and unsupported videos to prevent crashes
+        const supportedVideos = videoResolutionService.filterSupportedVideos(uniqueVideos);
+        
+        // 4. Check memory limits
+        const canLoadMore = videoResolutionService.canLoadMoreVideos(supportedVideos.length);
+        if (!canLoadMore) {
+          console.log('🧠 Memory limit reached, loading fewer videos');
+          supportedVideos.splice(10); // Limit to 10 videos
+        }
+        
+        const enhancedVideos: AlgorithmicVideoData[] = supportedVideos.map((video: any) => ({
           assetId: video.assetId || video.id, // Ensure we have an assetId
           videoId: video.videoId || video.assetId || video.id,
           playbackUrl: video.streamingUrl || video.playbackUrl || video.videoUrl || '',
@@ -4002,7 +4031,11 @@ const AlgorithmicHomeScreen: React.FC = () => {
           return video.assetId && (video.streamingUrl || video.playbackUrl) && video.userId;
         });
         
+        // Mark videos as loaded to prevent duplicates
+        feedDeduplicationService.markVideosLoaded(videoIds, 'algorithmic');
+        
         setAlgorithmicVideos(enhancedVideos);
+        console.log(`🎬 Final enhanced videos: ${enhancedVideos.length} (filtered from ${feedVideos.length})`);
       }
       
       // Start watch tracking for first video if available
@@ -4123,8 +4156,28 @@ const AlgorithmicHomeScreen: React.FC = () => {
     if (!user || isLoadingFeed) return;
     
     try {
+      // ✅ Check memory limits before loading more
+      if (!videoResolutionService.canLoadMoreVideos(algorithmicVideos.length + 10)) {
+        console.log('🧠 Memory limit reached, not loading more videos');
+        return;
+      }
+      
       const moreVideos = await algorithmicFeedService.getPersonalizedFeed(user.uid, 10);
-      const enhancedMoreVideos: AlgorithmicVideoData[] = moreVideos.map((video: any) => ({
+      
+      // ✅ Apply deduplication and filtering
+      const uniqueVideos = feedDeduplicationService.removeDuplicates(moreVideos);
+      const videoIds = uniqueVideos.map(v => v.id || v.assetId);
+      const isDuplicate = feedDeduplicationService.isDuplicateLoad(videoIds, 'pagination');
+      
+      if (isDuplicate) {
+        console.log('🚫 Duplicate pagination detected, skipping');
+        return;
+      }
+      
+      // Filter out 4K and unsupported videos
+      const supportedVideos = videoResolutionService.filterSupportedVideos(uniqueVideos);
+      
+      const enhancedMoreVideos: AlgorithmicVideoData[] = supportedVideos.map((video: any) => ({
         assetId: video.assetId,
         videoId: video.videoId || video.assetId,
         playbackUrl: video.streamingUrl || video.playbackUrl,
@@ -4143,12 +4196,15 @@ const AlgorithmicHomeScreen: React.FC = () => {
         personalizedScore: 0.7
       }));
       
+      // Mark videos as loaded
+      feedDeduplicationService.markVideosLoaded(videoIds, 'pagination');
+      
       setAlgorithmicVideos(prev => [...prev, ...enhancedMoreVideos]);
-      console.log(`📥 Loaded ${enhancedMoreVideos.length} more videos`);
+      console.log(`📥 Loaded ${enhancedMoreVideos.length} more videos (filtered from ${moreVideos.length})`);
     } catch (error) {
       console.error('❌ Error loading more videos:', error);
     }
-  }, [user, isLoadingFeed]);
+  }, [user, isLoadingFeed, algorithmicVideos.length]);
 
   // 🎯 Enhanced Engagement Handlers
   const handleVideoLike = useCallback((videoId: string) => {
@@ -4204,7 +4260,29 @@ const AlgorithmicHomeScreen: React.FC = () => {
     }
   }, [isVideoPlayerVisible, watchStartTime, algorithmicVideos, currentVideoIndex, trackVideoEngagement]);
 
-  // � Focus Management - Pause videos when navigating away from home screen
+  // ✅ Cleanup effect to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      console.log('🧹 AlgorithmicHomeScreen cleanup: clearing video data and timers');
+      
+      // Stop any ongoing tracking
+      engagementTrackingService.stopWatching();
+      
+      // Clear video state to prevent memory leaks
+      setAlgorithmicVideos([]);
+      setCurrentVideoIndex(0);
+      setWatchStartTime(0);
+      setTotalWatchTime(0);
+      
+      // Reset deduplication service
+      feedDeduplicationService.reset();
+      
+      // Cleanup memory management service
+      memoryManagementService.cleanup();
+    };
+  }, []);
+
+  // 🏠 Focus Management - Pause videos when navigating away from home screen
   useFocusEffect(
     useCallback(() => {
       console.log('🏠 Home screen focused - videos can resume');
