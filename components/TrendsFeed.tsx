@@ -92,8 +92,8 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
       snapshot.forEach((doc) => {
         const data = doc.data();
         
-        // IMPORTANT: Exclude current user's videos from Trends feed
-        // Users should only see their own Trends uploads in their profile, not in the global feed
+        // IMPORTANT: Show only current user's videos in Trends feed
+        // Users should see their own Trends uploads in the Trends tab
         const isCurrentUserVideo = user?.uid && data.userId === user.uid;
         
         // Prioritize videos uploaded specifically to Trends tab
@@ -110,8 +110,8 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
         console.log(`   - Is Valid Video: ${isValidVideo}`);
         console.log(`   - Is Current User Video: ${isCurrentUserVideo}`);
         
-        // Include trending uploads and other quality videos, BUT exclude current user's videos
-        if (isValidVideo && !isCurrentUserVideo && (isTrendingUpload || Math.random() > 0.3)) {
+        // Include only current user's videos that are valid
+        if (isValidVideo && isCurrentUserVideo) {
           console.log(`✅ INCLUDED in Trends: Video ${doc.id} by ${data.username}`);
           newVideos.push({
             id: doc.id,
@@ -130,7 +130,7 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
             contentType: data.contentType,
           });
         } else {
-          const reason = isCurrentUserVideo ? 'Current user\'s own video' : 'Not valid or not selected';
+          const reason = !isCurrentUserVideo ? 'Not current user\'s video' : 'Not valid video';
           console.log(`🚫 EXCLUDED from Trends: Video ${doc.id} - ${reason}`);
         }
       });
@@ -147,9 +147,9 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
 
-      console.log(`🔥 Loaded ${newVideos.length} trending videos (excluding current user's videos)`);
-      console.log(`📈 ${newVideos.filter(v => v.uploadTab === 'Trends').length} videos uploaded to Trends by other users`);
-      console.log(`🎬 ${newVideos.filter(v => v.uploadTab !== 'Trends').length} other trending videos`);
+      console.log(`🔥 Loaded ${newVideos.length} trending videos (current user's videos only)`);
+      console.log(`📈 ${newVideos.filter(v => v.uploadTab === 'Trends').length} videos uploaded to Trends by current user`);
+      console.log(`🎬 ${newVideos.filter(v => v.uploadTab !== 'Trends').length} other videos by current user`);
 
       // Update state
       if (isRefresh) {
