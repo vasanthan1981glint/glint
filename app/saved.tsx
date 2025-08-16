@@ -39,8 +39,6 @@ export default function SavedScreen() {
     try {
       if (refresh) {
         setRefreshing(true);
-      } else {
-        setLoading(true);
       }
 
       const response = await enhancedSaveService.getSavedVideos(20, 0);
@@ -104,6 +102,22 @@ export default function SavedScreen() {
     }, [loadSavedVideos])
   );
 
+  // Format save date
+  const formatSaveDate = (dateString: string): string => {
+    try {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+
+      if (diffInHours < 1) return 'Just now';
+      if (diffInHours < 24) return `${diffInHours}h ago`;
+      if (diffInHours < 168) return `${Math.floor(diffInHours / 24)}d ago`;
+      return `${Math.floor(diffInHours / 168)}w ago`;
+    } catch {
+      return 'Recently';
+    }
+  };
+
   // Render video item
   const renderVideoItem = ({ item }: { item: SavedVideo }) => (
     <View style={styles.videoItem}>
@@ -111,7 +125,6 @@ export default function SavedScreen() {
         style={styles.videoContainer}
         onPress={() => handlePlayVideo(item)}
       >
-        {/* Video Thumbnail */}
         <View style={styles.thumbnailContainer}>
           {item.videoData?.thumbnail ? (
             <Image 
@@ -125,13 +138,11 @@ export default function SavedScreen() {
             </View>
           )}
           
-          {/* Play button overlay */}
           <View style={styles.playButtonOverlay}>
             <Ionicons name="play" size={24} color="white" />
           </View>
         </View>
 
-        {/* Video Info */
         <View style={styles.videoInfo}>
           <Text style={styles.videoTitle} numberOfLines={2}>
             {item.videoData?.caption || item.videoData?.title || 'Saved Video'}
@@ -143,7 +154,6 @@ export default function SavedScreen() {
         </View>
       </Pressable>
 
-      {/* Remove button */}
       <Pressable
         style={styles.removeButton}
         onPress={() => {
@@ -186,76 +196,65 @@ export default function SavedScreen() {
     );
   }
 
+  // Empty state
+  if (!loading && savedVideos.length === 0) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="white" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Saved Videos</Text>
+          <View style={{ width: 24 }} />
+        </View>
+
+        <View style={styles.emptyContainer}>
+          <Ionicons name="bookmark-outline" size={64} color="#666" />
+          <Text style={styles.emptyTitle}>No saved videos</Text>
+          <Text style={styles.emptySubtitle}>
+            Videos you save will appear here
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.title}>Saved Videos</Text>
-        <Text style={styles.count}>{savedVideos.length}</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      {/* Content */}
-      {savedVideos.length === 0 ? (
-        // Empty state
-        <View style={styles.emptyContainer}>
-          <Ionicons name="bookmark-outline" size={80} color="#666" />
-          <Text style={styles.emptyTitle}>No Saved Videos</Text>
-          <Text style={styles.emptyDescription}>
-            Start saving videos you love to see them here
-          </Text>
-        </View>
-      ) : (
-        // Video grid
-        <FlatList
-          data={savedVideos}
-          renderItem={renderVideoItem}
-          keyExtractor={(item) => item.savedId || item.id}
-          numColumns={2}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.listContainer}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => loadSavedVideos(true)}
-              tintColor="#007AFF"
-            />
-          }
-          onEndReached={loadMoreVideos}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={() => 
-            loadingMore ? (
-              <View style={styles.loadMoreContainer}>
-                <ActivityIndicator size="small" color="#007AFF" />
-              </View>
-            ) : null
-          }
-        />
-      )}
+      <FlatList
+        data={savedVideos}
+        renderItem={renderVideoItem}
+        keyExtractor={(item) => item.savedId || item.videoId}
+        numColumns={2}
+        contentContainerStyle={styles.grid}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadSavedVideos(true)}
+            tintColor="#007AFF"
+          />
+        }
+        onEndReached={loadMoreVideos}
+        onEndReachedThreshold={0.1}
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.footerLoader}>
+              <ActivityIndicator size="small" color="#007AFF" />
+            </View>
+          ) : null
+        }
+      />
     </SafeAreaView>
   );
-}
-
-// Helper functions
-function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
-function formatSaveDate(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) return 'today';
-  if (diffDays === 1) return 'yesterday';
-  if (diffDays < 7) return `${diffDays} days ago`;
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-  return date.toLocaleDateString();
 }
 
 const styles = StyleSheet.create({
@@ -272,55 +271,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
   },
   title: {
     color: 'white',
     fontSize: 18,
-    fontWeight: 'bold',
-  },
-  count: {
-    color: '#007AFF',
-    fontSize: 16,
     fontWeight: '600',
   },
-  loadingContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: 'white',
-    marginTop: 16,
-    fontSize: 16,
-  },
-  listContainer: {
+  grid: {
     padding: 10,
   },
   videoItem: {
     width: itemWidth,
     marginHorizontal: 5,
-    marginBottom: 15,
-    position: 'relative',
-  },
-  videoContainer: {
-    backgroundColor: '#111',
+    marginBottom: 20,
+    backgroundColor: '#1C1C1E',
     borderRadius: 12,
     overflow: 'hidden',
   },
-  thumbnailContainer: {
+  videoContainer: {
     position: 'relative',
+  },
+  thumbnailContainer: {
     width: '100%',
-    aspectRatio: 16/9,
+    height: itemWidth * 1.2,
+    position: 'relative',
   },
   thumbnail: {
     width: '100%',
     height: '100%',
+    backgroundColor: '#333',
   },
   placeholderThumbnail: {
-    backgroundColor: '#333',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -328,14 +312,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '50%',
     left: '50%',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    transform: [{ translateX: -15 }, { translateY: -15 }],
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: -20,
-    marginLeft: -20,
   },
   videoInfo: {
     padding: 12,
@@ -354,9 +337,22 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    width: 24,
+    height: 24,
     borderRadius: 12,
-    padding: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: 'white',
+    marginTop: 16,
+    fontSize: 16,
   },
   emptyContainer: {
     flex: 1,
@@ -366,18 +362,18 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     color: 'white',
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 20,
-    marginBottom: 10,
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
   },
-  emptyDescription: {
+  emptySubtitle: {
     color: '#999',
     fontSize: 16,
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 22,
   },
-  loadMoreContainer: {
+  footerLoader: {
     paddingVertical: 20,
     alignItems: 'center',
   },
