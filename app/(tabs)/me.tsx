@@ -122,13 +122,25 @@ function MyProfileScreen() {
           }
         }
 
-        // Count user's videos for accurate glint count
+        // Count user's videos for accurate glint count - ONLY Glints, not Trends
         const videosQuery = query(
           collection(db, 'videos'),
           where('userId', '==', targetUserId)
         );
         const videosSnapshot = await getDocs(videosQuery);
-        setGlints(videosSnapshot.size);
+        
+        // Filter out Trends uploads - only count actual Glints
+        let glintsCount = 0;
+        videosSnapshot.forEach((doc) => {
+          const videoData = doc.data();
+          // Only count if uploadTab is NOT 'Trends' (i.e., it's a Glints upload or legacy video)
+          if (videoData.uploadTab !== 'Trends') {
+            glintsCount++;
+          }
+        });
+        setGlints(glintsCount);
+        
+        console.log(`📊 Glints count calculated: ${glintsCount} (excluding ${videosSnapshot.size - glintsCount} Trends uploads)`);
 
         // Update global state if viewing own profile
         if (isOwnProfile) {
@@ -195,13 +207,25 @@ function MyProfileScreen() {
             }
           }
 
-          // Count user's videos for accurate glint count
+          // Count user's videos for accurate glint count - ONLY Glints, not Trends
           const videosQuery = query(
             collection(db, 'videos'),
             where('userId', '==', targetUserId)
           );
           const videosSnapshot = await getDocs(videosQuery);
-          setGlints(videosSnapshot.size);
+          
+          // Filter out Trends uploads - only count actual Glints
+          let glintsCount = 0;
+          videosSnapshot.forEach((doc) => {
+            const videoData = doc.data();
+            // Only count if uploadTab is NOT 'Trends' (i.e., it's a Glints upload or legacy video)
+            if (videoData.uploadTab !== 'Trends') {
+              glintsCount++;
+            }
+          });
+          setGlints(glintsCount);
+          
+          console.log(`📊 Glints count calculated: ${glintsCount} (excluding ${videosSnapshot.size - glintsCount} Trends uploads)`);
 
           // If viewing own profile, update global state
           if (isOwnProfile) {

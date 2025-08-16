@@ -13,6 +13,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
 import { formatCount } from '../utils/formatUtils';
 import TrendsVideoPlayer from './TrendsVideoPlayer';
@@ -42,6 +43,7 @@ interface TrendsFeedProps {
 
 const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
   const router = useRouter();
+  const { user } = useAuth(); // Get current user to filter out their videos
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -90,6 +92,10 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
       snapshot.forEach((doc) => {
         const data = doc.data();
         
+        // IMPORTANT: Exclude current user's videos from Trends feed
+        // Users should only see their own Trends uploads in their profile, not in the global feed
+        const isCurrentUserVideo = user?.uid && data.userId === user.uid;
+        
         // Prioritize videos uploaded specifically to Trends tab
         const isTrendingUpload = data.uploadTab === 'Trends';
         const isValidVideo = data.processed && data.status === 'ready' && (data.videoUrl || data.playbackUrl);
@@ -102,10 +108,11 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
         console.log(`   - Has Video URL: ${!!(data.videoUrl || data.playbackUrl)}`);
         console.log(`   - Is Trending Upload: ${isTrendingUpload}`);
         console.log(`   - Is Valid Video: ${isValidVideo}`);
+        console.log(`   - Is Current User Video: ${isCurrentUserVideo}`);
         
-        // Include trending uploads and other quality videos
-        if (isValidVideo && (isTrendingUpload || Math.random() > 0.3)) {
-          console.log(`✅ INCLUDED in Trends: Video ${doc.id}`);
+        // Include trending uploads and other quality videos, BUT exclude current user's videos
+        if (isValidVideo && !isCurrentUserVideo && (isTrendingUpload || Math.random() > 0.3)) {
+          console.log(`✅ INCLUDED in Trends: Video ${doc.id} by ${data.username}`);
           newVideos.push({
             id: doc.id,
             userId: data.userId,
@@ -123,7 +130,8 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
             contentType: data.contentType,
           });
         } else {
-          console.log(`🚫 EXCLUDED from Trends: Video ${doc.id} - Not valid or not selected`);
+          const reason = isCurrentUserVideo ? 'Current user\'s own video' : 'Not valid or not selected';
+          console.log(`🚫 EXCLUDED from Trends: Video ${doc.id} - ${reason}`);
         }
       });
 
@@ -139,8 +147,8 @@ const TrendsFeed: React.FC<TrendsFeedProps> = ({ refreshKey }) => {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
 
-      console.log(`🔥 Loaded ${newVideos.length} trending videos`);
-      console.log(`📈 ${newVideos.filter(v => v.uploadTab === 'Trends').length} videos uploaded to Trends`);
+      console.log(`🔥 Loaded ${newVideos.length} trending videos (excluding current user's videos)`);
+      console.log(`📈 ${newVideos.filter(v => v.uploadTab === 'Trends').length} videos uploaded to Trends by other users`);
       console.log(`🎬 ${newVideos.filter(v => v.uploadTab !== 'Trends').length} other trending videos`);
 
       // Update state
